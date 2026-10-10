@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1E5EFF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>SkoliData</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap">
+<style>
+:root{--blue:#1E5EFF;--deep:#1748D6;--light:#5AA2FF;--pale:#E8F1FF;--navy:#0B1F44;--slate:#5B6987;--ground:#F3F6FC;--line:#DCE4F2;--soft:#A9C8FF;--white:#fff}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--ground);color:var(--navy);font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+main{max-width:460px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 28px);display:flex;flex-direction:column;gap:14px;min-height:100vh}
+h1{margin:0;font-size:34px;font-weight:800;letter-spacing:-.02em}
+.sub{font-size:15px;font-weight:600;color:var(--slate)}
+.card{background:var(--white);border:1px solid #E4EBF7;border-radius:22px;padding:16px;box-shadow:0 1px 2px rgba(11,31,68,.04),0 8px 24px rgba(11,31,68,.05)}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:56px;border-radius:16px;border:none;font:700 17px 'Plus Jakarta Sans',system-ui,sans-serif;cursor:pointer}
+.primary{background:var(--blue);color:#fff}
+.secondary{background:#fff;color:var(--deep);border:1.5px solid #C9D8F8}
+.text{background:none;color:var(--deep);height:44px}
+.hidden{display:none!important}
+.pill{align-self:center;display:flex;align-items:center;gap:10px;min-height:44px;padding:0 18px;border-radius:22px;background:#fff;border:1px solid #E4EBF7;font-weight:700;font-size:16px;text-align:center}
+.dot{width:10px;height:10px;border-radius:5px;background:var(--blue);box-shadow:0 0 0 4px rgba(30,94,255,.18);flex:none}
+.dot.off{background:none;border:2px solid var(--slate);box-shadow:none}
+.dot.wait{background:var(--soft);box-shadow:none}
+.ringwrap{position:relative;width:220px;height:220px;align-self:center}
+.ringwrap svg{position:absolute;inset:0;transform:rotate(-90deg)}
+.ringtxt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.big{font-weight:800;letter-spacing:-.03em;display:flex;align-items:baseline;gap:3px}
+.big b{font-size:40px;line-height:1}.big i{font-style:normal;font-size:18px;margin-right:5px}
+.goal{font-size:15px;font-weight:700;color:var(--slate)}
+.week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-top:10px}
+.wd{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--slate)}
+.wd span:first-child{width:32px;height:32px;border-radius:16px;border:2px dashed var(--line)}
+.wd.done span:first-child{background:var(--blue);border:none}
+.wd.miss span:first-child{border:2.5px solid var(--soft)}
+.wd.today span:first-child{border:2.5px solid var(--blue);display:flex;align-items:center;justify-content:center}
+.wd.today span:first-child::after{content:'';width:10px;height:10px;border-radius:5px;background:var(--blue)}
+.wd.today{color:var(--navy);font-weight:800}
+.row{display:flex;justify-content:space-between;align-items:baseline}
+.upd{text-align:center;font-size:14px;font-weight:600;color:var(--slate)}
+.note{background:var(--pale);border:1px solid #D3E2FD;border-radius:20px;padding:14px 16px;font-size:15px;line-height:1.4;color:#34446A}
+.note b{display:block;color:var(--navy);margin-bottom:2px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.stat span{display:block;font-size:13px;font-weight:700;color:var(--slate)}.stat b{font-size:22px;font-weight:800}
+canvas{width:100%;height:120px;display:block}
+.mark{width:84px;height:84px;border-radius:42px;background:linear-gradient(135deg,var(--light),var(--blue));display:flex;align-items:center;justify-content:center;align-self:center;box-shadow:0 12px 30px rgba(30,94,255,.28)}
+.mark span{width:32px;height:32px;border-radius:16px;border:5px solid #fff}
+.korsem{height:76px;border-radius:24px;background:linear-gradient(135deg,#3D7DFF 0%,#1E5EFF 55%,#1646D0 100%);color:#fff;font-size:24px;font-weight:800;box-shadow:0 14px 30px rgba(30,94,255,.3)}
+.small{font-size:13px;color:var(--slate);text-align:center;line-height:1.4}
+.stepper{display:flex;align-items:center;justify-content:space-between}
+.stepper button{width:44px;height:44px;border-radius:22px;border:none;background:var(--pale);color:var(--deep);font:800 22px system-ui}
+</style>
+</head>
+<body>
+<main id="welcome">
+  <div style="flex:1"></div>
+  <div class="mark" aria-hidden="true"><span></span></div>
+  <div style="text-align:center"><h1>SkoliData</h1><p class="sub" style="margin:8px 0 0">Korse saatleri kendiliğinden kaydedilir.</p></div>
+  <div style="flex:1"></div>
+  <button class="btn korsem" id="connectBtn">Butona bağlan</button>
+  <button class="btn secondary" id="demoBtn">Demo modu (buton olmadan)</button>
+  <p class="small" id="bleHint"></p>
+</main>
+
+<main id="home" class="hidden">
+  <header class="row" style="align-items:flex-end">
+    <div><div class="sub" id="dateTxt"></div><h1>Bugün</h1></div>
+    <button class="btn text" style="width:auto" id="detailsBtn" aria-expanded="false">Ayrıntılar</button>
+  </header>
+  <div class="note hidden" id="connNote"><b>Bağlantı koptu</b>Telefonunu butona yaklaştır. <button class="btn text" style="height:36px;width:auto;padding:0" id="reconnectBtn">Yeniden bağlan</button></div>
+  <div class="ringwrap" role="img" id="ringBox" aria-label="">
+    <svg viewBox="0 0 220 220" aria-hidden="true">
+      <defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5AA2FF"/><stop offset="1" stop-color="#1E5EFF"/></linearGradient></defs>
+      <circle cx="110" cy="110" r="100" fill="none" stroke="#E8F1FF" stroke-width="20"/>
+      <circle id="ringArc" cx="110" cy="110" r="100" fill="none" stroke="url(#rg)" stroke-width="20" stroke-linecap="round" stroke-dasharray="0 628.3"/>
+    </svg>
+    <div class="ringtxt"><div class="big"><b id="hh">0</b><i>sa</i><b id="mm">0</b><i>dk</i></div><div class="goal" id="goalTxt">Hedef 16 sa</div></div>
+  </div>
+  <div class="pill" id="pill"><span class="dot wait" id="dot"></span><span id="statusTxt">Butondan veri bekleniyor…</span></div>
+  <section class="card">
+    <div class="row"><b style="font-size:16px">Bu hafta</b><span class="sub" style="font-size:14px" id="weekTxt"></span></div>
+    <div class="week" id="week"></div>
+  </section>
+  <div class="upd" id="updTxt"></div>
+
+  <section id="details" class="hidden" style="display:flex;flex-direction:column;gap:12px">
+    <div class="note"><b>Geliştirici ekranı</b>Ailelere gösterilmez. Sıcaklık ve nem sadece test için.</div>
+    <section class="card grid2">
+      <div class="stat"><span>Ten tarafı</span><b id="dSkin">–</b></div>
+      <div class="stat"><span>Nem</span><b id="dRh">–</b></div>
+      <div class="stat"><span>Kapak (çip)</span><b id="dChip">–</b></div>
+      <div class="stat"><span>Pil</span><b id="dV">–</b></div>
+    </section>
+    <section class="card"><b style="font-size:15px">Ten tarafı sıcaklık, son 6 saat</b><canvas id="chart" width="840" height="240"></canvas>
+      <p class="small" style="text-align:left;margin:6px 0 0">Kesikli çizgi: takılı eşiği (<span id="thrTxt"></span>). Geçici kural; deneylerden sonra değişecek.</p></section>
+    <section class="card">
+      <div class="stepper"><button id="gMinus" aria-label="Hedefi azalt">–</button><b id="goalEdit">16 saat</b><button id="gPlus" aria-label="Hedefi artır">+</button></div>
+      <p class="small" style="margin:8px 0 0" id="devInfo"></p>
+    </section>
+    <button class="btn secondary" id="csvBtn">Verileri CSV olarak kopyala</button>
+  </section>
+</main>
+
+<script>
+// ---------- settings ----------
+const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e', NUS_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e', NUS_TX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const ON_C = 30.5, OFF_C = 29.5;          // placeholder wear rule with hysteresis (to be replaced by the calibrator)
+let goalH = 16;
+
+// ---------- state ----------
+const recs = new Map();                  // index -> {t: ms, skin, rh, chip, mv}
+let mode = null, device = null, rxChar = null, buf = '', info = null, demoTimer = null;
+const $ = id => document.getElementById(id);
+
+// ---------- Bluetooth ----------
+if (!navigator.bluetooth) {
+  $('bleHint').textContent = "Bu tarayıcı Bluetooth'a bağlanamıyor. iPhone'da ücretsiz \"Bluefy\" uygulamasıyla, Android'de Chrome ile aç. Demo modu her yerde çalışır.";
+}
+$('connectBtn').onclick = async () => {
+  if (!navigator.bluetooth) { alert("iPhone'da bu sayfayı Bluefy uygulamasında, Android'de Chrome'da aç."); return; }
+  try {
+    device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'SK-' }, { services: [NUS] }], optionalServices: [NUS] });
+    device.addEventListener('gattserverdisconnected', () => { $('connNote').classList.remove('hidden'); render(); });
+    await connectGatt();
+    mode = 'live'; showHome();
+  } catch (e) { if (e && e.name !== 'NotFoundError') alert('Bağlanamadı: ' + e.message); }
+};
+$('reconnectBtn').onclick = async () => { try { await connectGatt(); } catch (e) { alert('Bağlanamadı: ' + e.message); } };
+
+async function connectGatt() {
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(NUS);
+  const tx = await svc.getCharacteristic(NUS_TX);
+  rxChar = await svc.getCharacteristic(NUS_RX);
+  tx.addEventListener('characteristicvaluechanged', ev => onData(new TextDecoder().decode(ev.target.value)));
+  await tx.startNotifications();
+  $('connNote').classList.add('hidden');
+  info = null; buf = '';
+  await send('i');                        // info first (gives the button's uptime -> real clock)
+  setTimeout(() => send('d'), 800);       // then all stored readings
+}
+async function send(s) { if (rxChar) await rxChar.writeValue(new TextEncoder().encode(s)); }
+
+function onData(chunk) {
+  buf += chunk;
+  let i;
+  while ((i = buf.indexOf('\n')) >= 0) { handleLine(buf.slice(0, i).trim()); buf = buf.slice(i + 1); }
+}
+function handleLine(line) {
+  if (!line) return;
+  if (line.startsWith('SkoliData')) {
+    const up = /up=(\d+)s/.exec(line), code = /SK-[0-9A-Z]+/.exec(line);
+    info = { up: up ? +up[1] : 0, at: Date.now(), code: code ? code[0] : '' };
+    render(); return;
+  }
+  if (line.startsWith('index') || line === 'end') { render(); return; }
+  const p = line.split(',');
+  if (p.length < 6 || !info) return;
+  const idx = +p[0], secs = +p[1];
+  recs.set(idx, {
+    t: info.at - (info.up - secs) * 1000,
+    skin: p[2] === 'ERR' ? null : +p[2], rh: p[3] === 'ERR' ? null : +p[3], chip: +p[4], mv: +p[5]
+  });
+  render();
+}
+
+// ---------- demo data ----------
+$('demoBtn').onclick = () => { mode = 'demo'; makeDemo(); showHome(); demoTimer = setInterval(() => { addDemoPoint(Date.now()); render(); }, 5000); };
+function demoTemp(t) {
+  const d = new Date(t), h = d.getHours() + d.getMinutes() / 60;
+  const worn = (h < 7.3) || (h >= 8.1 && h < 12.4) || (h >= 13.1 && h < 16.0) || h >= 20.5;
+  return worn ? 33.6 + Math.sin(t / 9e5) * 0.6 : 23.5 + Math.sin(t / 2e6) * 0.8;
+}
+let demoIdx = 0;
+function addDemoPoint(t) {
+  const skin = demoTemp(t);
+  recs.set(demoIdx++, { t, skin: +skin.toFixed(2), rh: skin > 30 ? 58 + Math.random() * 6 : 41 + Math.random() * 3, chip: skin > 30 ? 29 : 23.4, mv: 2840 });
+}
+function makeDemo() {
+  const now = Date.now(), mid = new Date(); mid.setHours(0, 0, 0, 0);
+  for (let t = mid.getTime(); t <= now; t += 60000) addDemoPoint(t);
+  info = { up: 0, at: now, code: 'SK-DEMO0000' };
+}
+
+// ---------- wear logic ----------
+function sortedRecs() { return [...recs.values()].filter(r => r.skin !== null).sort((a, b) => a.t - b.t); }
+function wornFlags(list) {
+  let on = false;
+  return list.map(r => (on = on ? r.skin >= OFF_C : r.skin >= ON_C));
+}
+function wornMsSince(list, flags, from) {
+  let ms = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (!flags[i] || list[i].t < from) continue;
+    const next = i + 1 < list.length ? list[i + 1].t : Math.min(Date.now(), list[i].t + 120000);
+    ms += Math.min(next - list[i].t, 300000);          // gaps longer than 5 min aren't counted
+  }
+  return ms;
+}
+
+// ---------- UI ----------
+function showHome() { $('welcome').classList.add('hidden'); $('home').classList.remove('hidden'); buildWeek(); render(); setInterval(render, 30000); }
+$('detailsBtn').onclick = () => {
+  const d = $('details'), open = d.classList.toggle('hidden') === false;
+  $('detailsBtn').setAttribute('aria-expanded', open); render();
+};
+$('gMinus').onclick = () => { goalH = Math.max(1, goalH - 1); render(); };
+$('gPlus').onclick = () => { goalH = Math.min(24, goalH + 1); render(); };
+$('csvBtn').onclick = async () => {
+  const rows = ['time,skin_C,humidity_pct,chip_C,supply_mV'].concat([...recs.values()].sort((a, b) => a.t - b.t)
+    .map(r => [new Date(r.t).toISOString(), r.skin ?? 'ERR', r.rh ?? 'ERR', r.chip, r.mv].join(',')));
+  try { await navigator.clipboard.writeText(rows.join('\n')); alert(rows.length - 1 + ' satır kopyalandı.'); }
+  catch { alert('Kopyalanamadı.'); }
+};
+
+const DAYS = ['Pz', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'];
+function buildWeek() {
+  const today = new Date().getDay(), order = [1, 2, 3, 4, 5, 6, 0];
+  $('week').innerHTML = order.map(d => {
+    const cls = d === today ? 'today' : '';
+    return `<div class="wd ${cls}"><span></span><span>${DAYS[d]}</span></div>`;
+  }).join('');
+}
+
+function render() {
+  const now = new Date();
+  $('dateTxt').textContent = now.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const list = sortedRecs(), flags = wornFlags(list);
+  const mid = new Date(); mid.setHours(0, 0, 0, 0);
+  const ms = wornMsSince(list, flags, mid.getTime());
+  const h = Math.floor(ms / 3.6e6), m = Math.floor((ms % 3.6e6) / 6e4);
+  $('hh').textContent = h; $('mm').textContent = m;
+  $('goalTxt').textContent = `Hedef ${goalH} sa`; $('goalEdit').textContent = `${goalH} saat`;
+  const frac = Math.min(1, ms / (goalH * 3.6e6));
+  $('ringArc').setAttribute('stroke-dasharray', `${(628.3 * frac).toFixed(1)} 628.3`);
+  $('ringBox').setAttribute('aria-label', `Bugün ${h} saat ${m} dakika takıldı, hedef ${goalH} saat`);
+  $('weekTxt').textContent = mode === 'demo' ? 'Demo' : 'Sadece bugün';
+
+  const last = list[list.length - 1], connected = mode === 'demo' || (device && device.gatt.connected);
+  const dot = $('dot');
+  if (!last) { dot.className = 'dot wait'; $('statusTxt').textContent = connected ? 'Butondan veri bekleniyor…' : 'Telefonunu korsene yaklaştır.'; }
+  else if (flags[flags.length - 1]) { dot.className = 'dot'; $('statusTxt').textContent = 'Korsen takılı. Süper gidiyorsun!'; }
+  else { dot.className = 'dot off'; $('statusTxt').textContent = 'Korse şu an dinleniyor.'; }
+  $('updTxt').textContent = last ? 'Son güncelleme: ' + ago(last.t) : '';
+
+  if (!$('details').classList.contains('hidden')) {
+    const r = [...recs.values()].sort((a, b) => a.t - b.t).pop();
+    $('dSkin').textContent = r && r.skin !== null ? r.skin.toFixed(2) + ' °C' : '–';
+    $('dRh').textContent = r && r.rh !== null ? Math.round(r.rh) + ' %' : '–';
+    $('dChip').textContent = r ? r.chip.toFixed(1) + ' °C' : '–';
+    $('dV').textContent = r ? (r.mv / 1000).toFixed(2) + ' V' : '–';
+    $('thrTxt').textContent = `${ON_C} °C üstü takılı, ${OFF_C} °C altı değil`;
+    $('devInfo').textContent = `${info ? info.code : ''} · ${recs.size} kayıt · ${mode === 'demo' ? 'demo verisi' : 'canlı'}`;
+    drawChart(list);
+  }
+}
+function ago(t) {
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return 'az önce';
+  if (s < 3600) return Math.round(s / 60) + ' dk önce';
+  return Math.round(s / 3600) + ' sa önce';
+}
+function drawChart(list) {
+  const c = $('chart'), g = c.getContext('2d'), W = c.width, H = c.height, from = Date.now() - 6 * 3.6e6;
+  g.clearRect(0, 0, W, H);
+  const pts = list.filter(r => r.t >= from);
+  const lo = 18, hi = 38, x = t => (t - from) / (6 * 3.6e6) * W, y = v => H - (v - lo) / (hi - lo) * H;
+  g.strokeStyle = '#DCE4F2'; g.lineWidth = 2;
+  [20, 25, 30, 35].forEach(v => { g.beginPath(); g.moveTo(0, y(v)); g.lineTo(W, y(v)); g.stroke(); });
+  g.fillStyle = '#5B6987'; g.font = '600 22px system-ui';
+  [20, 25, 30, 35].forEach(v => g.fillText(v + '°', 6, y(v) - 6));
+  g.setLineDash([10, 8]); g.strokeStyle = '#0B1F44'; g.beginPath(); g.moveTo(0, y(ON_C)); g.lineTo(W, y(ON_C)); g.stroke(); g.setLineDash([]);
+  if (pts.length > 1) { g.strokeStyle = '#1E5EFF'; g.lineWidth = 5; g.beginPath(); pts.forEach((r, i) => i ? g.lineTo(x(r.t), y(r.skin)) : g.moveTo(x(r.t), y(r.skin))); g.stroke(); }
+}
+</script>
+</body>
+</html>
