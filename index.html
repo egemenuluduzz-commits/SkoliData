@@ -101,6 +101,8 @@ canvas{width:100%;height:120px;display:block}
       <div class="stepper"><button id="gMinus" aria-label="Hedefi azalt">–</button><b id="goalEdit">16 saat</b><button id="gPlus" aria-label="Hedefi artır">+</button></div>
       <p class="small" style="margin:8px 0 0" id="devInfo"></p>
     </section>
+    <section class="card"><b style="font-size:15px">Bluetooth günlüğü</b>
+      <pre id="rawLog" style="white-space:pre-wrap;word-break:break-all;font-size:11px;line-height:1.4;margin:8px 0 0;max-height:220px;overflow:auto"></pre></section>
     <button class="btn secondary" id="csvBtn">Verileri CSV olarak kopyala</button>
   </section>
 </main>
@@ -154,7 +156,10 @@ async function askInfo(tries) {           // repeat "i" until the button answers
   setTimeout(() => askInfo(tries + 1), 1500);
 }
 function flushPending() { const p = pending; pending = []; p.forEach(handleLine); }
-async function send(s) { if (rxChar) await rxChar.writeValue(new TextEncoder().encode(s)); }
+async function send(s) { logRaw('→ ' + s); if (rxChar) await rxChar.writeValue(new TextEncoder().encode(s)); }
+const APP_VERSION = 'demo v0.3';
+let rxLines = 0, errLines = 0, rawLog = [];
+function logRaw(t) { rawLog.push(new Date().toLocaleTimeString('tr-TR') + '  ' + t); if (rawLog.length > 14) rawLog.shift(); }
 
 function onData(chunk) {
   buf += chunk;
@@ -163,6 +168,7 @@ function onData(chunk) {
 }
 function handleLine(line) {
   if (!line) return;
+  rxLines++; logRaw('← ' + line); if (line.includes('ERR')) errLines++;
   if (line.startsWith('SkoliData')) {
     const up = /up=(\d+)s/.exec(line), code = /SK-[0-9A-Z]+/.exec(line);
     const first = !info;
@@ -257,7 +263,12 @@ function render() {
 
   const last = list[list.length - 1], connected = mode === 'demo' || (device && device.gatt.connected);
   const dot = $('dot');
-  if (!last) { dot.className = 'dot wait'; $('statusTxt').textContent = connected ? 'Butondan veri bekleniyor…' : 'Telefonunu korsene yaklaştır.'; }
+  if (!last) {
+    dot.className = 'dot wait';
+    $('statusTxt').textContent = !connected ? 'Telefonunu korsene yaklaştır.'
+      : recs.size > 0 ? 'Buton bağlı, sensör okunamıyor (ERR).'
+      : rxLines > 0 ? `Bağlandı · ${rxLines} satır alındı…` : 'Butondan veri bekleniyor…';
+  }
   else if (flags[flags.length - 1]) { dot.className = 'dot'; $('statusTxt').textContent = 'Korsen takılı. Süper gidiyorsun!'; }
   else { dot.className = 'dot off'; $('statusTxt').textContent = 'Korse şu an dinleniyor.'; }
   $('updTxt').textContent = last ? 'Son güncelleme: ' + ago(last.t) : '';
@@ -272,6 +283,7 @@ function render() {
     $('devInfo').textContent = `${info ? info.code : ''} · ${recs.size} kayıt · ${mode === 'demo' ? 'demo verisi' : 'canlı'}`;
     drawChart(list);
   }
+  if ($('rawLog')) $('rawLog').textContent = `${APP_VERSION} · alınan satır: ${rxLines} · ERR: ${errLines} · kayıt: ${recs.size}\n` + rawLog.join('\n');
 }
 function ago(t) {
   const s = Math.max(0, Math.round((Date.now() - t) / 1000));
