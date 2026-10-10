@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1E5EFF">
+<meta name="robots" content="noindex, nofollow">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>SkoliData</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -138,10 +139,21 @@ async function connectGatt() {
   tx.addEventListener('characteristicvaluechanged', ev => onData(new TextDecoder().decode(ev.target.value)));
   await tx.startNotifications();
   $('connNote').classList.add('hidden');
-  info = null; buf = '';
-  await send('i');                        // info first (gives the button's uptime -> real clock)
-  setTimeout(() => send('d'), 800);       // then all stored readings
+  info = null; buf = ''; pending = []; dumpAsked = false;
+  askInfo(0);                             // info first (gives the button's uptime -> real clock), then all readings
 }
+let pending = [], dumpAsked = false;
+async function askInfo(tries) {           // repeat "i" until the button answers; then ask for the dump once
+  if (info) { if (!dumpAsked) { dumpAsked = true; send('d').catch(() => {}); } return; }
+  if (tries >= 6) {                       // fallback: no info line, so time the readings from the newest one
+    const last = pending.length ? Math.max(...pending.map(l => +l.split(',')[1] || 0)) : 0;
+    info = { up: last, at: Date.now(), code: device && device.name ? device.name : '' };
+    flushPending(); dumpAsked = true; send('d').catch(() => {}); return;
+  }
+  try { await send('i'); } catch (e) {}
+  setTimeout(() => askInfo(tries + 1), 1500);
+}
+function flushPending() { const p = pending; pending = []; p.forEach(handleLine); }
 async function send(s) { if (rxChar) await rxChar.writeValue(new TextEncoder().encode(s)); }
 
 function onData(chunk) {
@@ -153,12 +165,16 @@ function handleLine(line) {
   if (!line) return;
   if (line.startsWith('SkoliData')) {
     const up = /up=(\d+)s/.exec(line), code = /SK-[0-9A-Z]+/.exec(line);
+    const first = !info;
     info = { up: up ? +up[1] : 0, at: Date.now(), code: code ? code[0] : '' };
+    flushPending();
+    if (first && mode === 'live' && !dumpAsked) { dumpAsked = true; send('d').catch(() => {}); }
     render(); return;
   }
   if (line.startsWith('index') || line === 'end') { render(); return; }
   const p = line.split(',');
-  if (p.length < 6 || !info) return;
+  if (p.length < 6) return;
+  if (!info) { pending.push(line); return; }   // keep it until we know the button's clock
   const idx = +p[0], secs = +p[1];
   recs.set(idx, {
     t: info.at - (info.up - secs) * 1000,
