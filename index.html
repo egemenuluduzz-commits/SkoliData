@@ -12,17 +12,24 @@
 <style>
 :root{--blue:#1E5EFF;--deep:#1748D6;--light:#5AA2FF;--pale:#E8F1FF;--navy:#0B1F44;--slate:#5B6987;--ground:#F3F6FC;--line:#DCE4F2;--soft:#A9C8FF;--white:#fff}
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--ground);color:var(--navy);font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
-main{max-width:460px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 28px);display:flex;flex-direction:column;gap:14px;min-height:100vh}
-h1{margin:0;font-size:34px;font-weight:800;letter-spacing:-.02em}
+html,body{margin:0;background:var(--ground);color:var(--navy);font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;-webkit-text-size-adjust:100%}
+main{max-width:460px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 18px) 16px calc(env(safe-area-inset-bottom) + 28px);display:flex;flex-direction:column;gap:14px;min-height:100vh}
+h1{margin:0;font-size:32px;font-weight:800;letter-spacing:-.02em}
+h2{margin:0;font-size:20px;font-weight:800}
+p{margin:0;line-height:1.45}
 .sub{font-size:15px;font-weight:600;color:var(--slate)}
 .card{background:var(--white);border:1px solid #E4EBF7;border-radius:22px;padding:16px;box-shadow:0 1px 2px rgba(11,31,68,.04),0 8px 24px rgba(11,31,68,.05)}
-.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:56px;border-radius:16px;border:none;font:700 17px 'Plus Jakarta Sans',system-ui,sans-serif;cursor:pointer}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:54px;border-radius:16px;border:none;font:700 17px 'Plus Jakarta Sans',system-ui,sans-serif;cursor:pointer;padding:0 16px;text-decoration:none}
+.btn:disabled{opacity:.45;cursor:default}
 .primary{background:var(--blue);color:#fff}
 .secondary{background:#fff;color:var(--deep);border:1.5px solid #C9D8F8}
-.text{background:none;color:var(--deep);height:44px}
-.hidden{display:none!important}
-.pill{align-self:center;display:flex;align-items:center;gap:10px;min-height:44px;padding:0 18px;border-radius:22px;background:#fff;border:1px solid #E4EBF7;font-weight:700;font-size:16px;text-align:center}
+.text{background:none;color:var(--deep);min-height:44px;width:auto;padding:0 6px}
+.korsem{min-height:76px;border-radius:24px;background:linear-gradient(135deg,#3D7DFF 0%,#1E5EFF 55%,#1646D0 100%);color:#fff;font-size:24px;font-weight:800;box-shadow:0 14px 30px rgba(30,94,255,.3)}
+.klinisyen{min-height:76px;border-radius:24px;background:#fff;color:var(--navy);border:2px solid var(--blue);font-size:22px;font-weight:800}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.top{display:flex;align-items:center;justify-content:space-between;min-height:44px}
+.back{background:none;border:none;color:var(--deep);font:700 17px 'Plus Jakarta Sans',system-ui;display:flex;align-items:center;gap:4px;min-height:44px;padding:0;cursor:pointer}
+.pill{align-self:center;display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 18px;border-radius:22px;background:#fff;border:1px solid #E4EBF7;font-weight:700;font-size:16px;text-align:center}
 .dot{width:10px;height:10px;border-radius:5px;background:var(--blue);box-shadow:0 0 0 4px rgba(30,94,255,.18);flex:none}
 .dot.off{background:none;border:2px solid var(--slate);box-shadow:none}
 .dot.wait{background:var(--soft);box-shadow:none}
@@ -38,271 +45,721 @@ h1{margin:0;font-size:34px;font-weight:800;letter-spacing:-.02em}
 .wd.done span:first-child{background:var(--blue);border:none}
 .wd.miss span:first-child{border:2.5px solid var(--soft)}
 .wd.today span:first-child{border:2.5px solid var(--blue);display:flex;align-items:center;justify-content:center}
+.wd.today.done span:first-child{border:none}
 .wd.today span:first-child::after{content:'';width:10px;height:10px;border-radius:5px;background:var(--blue)}
+.wd.today.done span:first-child::after{background:#fff}
 .wd.today{color:var(--navy);font-weight:800}
-.row{display:flex;justify-content:space-between;align-items:baseline}
 .upd{text-align:center;font-size:14px;font-weight:600;color:var(--slate)}
-.note{background:var(--pale);border:1px solid #D3E2FD;border-radius:20px;padding:14px 16px;font-size:15px;line-height:1.4;color:#34446A}
+.note{background:var(--pale);border:1px solid #D3E2FD;border-radius:20px;padding:14px 16px;font-size:15px;line-height:1.45;color:#34446A}
 .note b{display:block;color:var(--navy);margin-bottom:2px}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .stat span{display:block;font-size:13px;font-weight:700;color:var(--slate)}.stat b{font-size:22px;font-weight:800}
-canvas{width:100%;height:120px;display:block}
+.small{font-size:13px;color:var(--slate);line-height:1.45}
+.center{text-align:center}
 .mark{width:84px;height:84px;border-radius:42px;background:linear-gradient(135deg,var(--light),var(--blue));display:flex;align-items:center;justify-content:center;align-self:center;box-shadow:0 12px 30px rgba(30,94,255,.28)}
 .mark span{width:32px;height:32px;border-radius:16px;border:5px solid #fff}
-.korsem{height:76px;border-radius:24px;background:linear-gradient(135deg,#3D7DFF 0%,#1E5EFF 55%,#1646D0 100%);color:#fff;font-size:24px;font-weight:800;box-shadow:0 14px 30px rgba(30,94,255,.3)}
-.small{font-size:13px;color:var(--slate);text-align:center;line-height:1.4}
+label.f{display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:700;color:var(--slate)}
+input.in{height:54px;border-radius:14px;border:1.5px solid var(--line);padding:0 14px;font:600 17px 'Plus Jakarta Sans',system-ui;color:var(--navy);background:#fff;width:100%}
+input.in:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 4px rgba(30,94,255,.12)}
+.err{color:var(--deep);font-weight:700;font-size:14px;min-height:20px}
 .stepper{display:flex;align-items:center;justify-content:space-between}
-.stepper button{width:44px;height:44px;border-radius:22px;border:none;background:var(--pale);color:var(--deep);font:800 22px system-ui}
+.stepper button{width:48px;height:48px;border-radius:24px;border:none;background:var(--pale);color:var(--deep);font:800 24px system-ui;cursor:pointer}
+.stepper b{font-size:26px;font-weight:800}
+.list{display:flex;flex-direction:column}
+.li{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:10px 0;border-bottom:1px solid #EEF2F9;background:none;border-left:none;border-right:none;border-top:none;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
+.li:last-child{border-bottom:none}
+.li .k{font-weight:700}.li .v{color:var(--slate);font-weight:600;font-size:15px;text-align:right}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--pale);color:var(--deep);border-radius:12px;padding:4px 10px;font-size:13px;font-weight:700}
+.check{display:flex;gap:12px;align-items:flex-start;font-weight:600;font-size:15px;line-height:1.4;cursor:pointer}
+.check input{width:24px;height:24px;accent-color:var(--blue);flex:none;margin:0}
+.gauge{display:flex;gap:4px}.gauge i{flex:1;height:10px;border-radius:5px;background:var(--line)}.gauge i.on{background:var(--blue)}
+pre.log{white-space:pre-wrap;word-break:break-all;font-size:11px;line-height:1.4;margin:8px 0 0;max-height:200px;overflow:auto;background:var(--ground);border-radius:12px;padding:10px}
+svg.chart{width:100%;height:auto;display:block}
+.timer{font-size:56px;font-weight:800;letter-spacing:-.03em;text-align:center;font-variant-numeric:tabular-nums}
+.steps{display:flex;gap:8px;justify-content:center}.steps i{width:28px;height:6px;border-radius:3px;background:var(--line)}.steps i.on{background:var(--blue)}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 20px);transform:translateX(-50%);background:var(--navy);color:#fff;padding:12px 18px;border-radius:14px;font-weight:700;font-size:15px;max-width:90vw;z-index:9}
 </style>
 </head>
 <body>
-<main id="welcome">
-  <div style="flex:1"></div>
-  <div class="mark" aria-hidden="true"><span></span></div>
-  <div style="text-align:center"><h1>SkoliData</h1><p class="sub" style="margin:8px 0 0">Korse saatleri kendiliğinden kaydedilir.</p></div>
-  <div style="flex:1"></div>
-  <button class="btn korsem" id="connectBtn">Butona bağlan</button>
-  <button class="btn secondary" id="demoBtn">Demo modu (buton olmadan)</button>
-  <p class="small" id="bleHint"></p>
-</main>
-
-<main id="home" class="hidden">
-  <header class="row" style="align-items:flex-end">
-    <div><div class="sub" id="dateTxt"></div><h1>Bugün</h1></div>
-    <button class="btn text" style="width:auto" id="detailsBtn" aria-expanded="false">Ayrıntılar</button>
-  </header>
-  <div class="note hidden" id="connNote"><b>Bağlantı koptu</b>Telefonunu butona yaklaştır. <button class="btn text" style="height:36px;width:auto;padding:0" id="reconnectBtn">Yeniden bağlan</button></div>
-  <div class="ringwrap" role="img" id="ringBox" aria-label="">
-    <svg viewBox="0 0 220 220" aria-hidden="true">
-      <defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5AA2FF"/><stop offset="1" stop-color="#1E5EFF"/></linearGradient></defs>
-      <circle cx="110" cy="110" r="100" fill="none" stroke="#E8F1FF" stroke-width="20"/>
-      <circle id="ringArc" cx="110" cy="110" r="100" fill="none" stroke="url(#rg)" stroke-width="20" stroke-linecap="round" stroke-dasharray="0 628.3"/>
-    </svg>
-    <div class="ringtxt"><div class="big"><b id="hh">0</b><i>sa</i><b id="mm">0</b><i>dk</i></div><div class="goal" id="goalTxt">Hedef 16 sa</div></div>
-  </div>
-  <div class="pill" id="pill"><span class="dot wait" id="dot"></span><span id="statusTxt">Butondan veri bekleniyor…</span></div>
-  <section class="card">
-    <div class="row"><b style="font-size:16px">Bu hafta</b><span class="sub" style="font-size:14px" id="weekTxt"></span></div>
-    <div class="week" id="week"></div>
-  </section>
-  <div class="upd" id="updTxt"></div>
-
-  <section id="details" class="hidden" style="display:flex;flex-direction:column;gap:12px">
-    <div class="note"><b>Geliştirici ekranı</b>Ailelere gösterilmez. Sıcaklık ve nem sadece test için.</div>
-    <section class="card grid2">
-      <div class="stat"><span>Ten tarafı</span><b id="dSkin">–</b></div>
-      <div class="stat"><span>Nem</span><b id="dRh">–</b></div>
-      <div class="stat"><span>Kapak (çip)</span><b id="dChip">–</b></div>
-      <div class="stat"><span>Pil</span><b id="dV">–</b></div>
-    </section>
-    <section class="card"><b style="font-size:15px">Ten tarafı sıcaklık, son 6 saat</b><canvas id="chart" width="840" height="240"></canvas>
-      <p class="small" style="text-align:left;margin:6px 0 0">Kesikli çizgi: takılı eşiği (<span id="thrTxt"></span>). Geçici kural; deneylerden sonra değişecek.</p></section>
-    <section class="card">
-      <div class="stepper"><button id="gMinus" aria-label="Hedefi azalt">–</button><b id="goalEdit">16 saat</b><button id="gPlus" aria-label="Hedefi artır">+</button></div>
-      <p class="small" style="margin:8px 0 0" id="devInfo"></p>
-    </section>
-    <section class="card"><b style="font-size:15px">Bluetooth günlüğü</b>
-      <pre id="rawLog" style="white-space:pre-wrap;word-break:break-all;font-size:11px;line-height:1.4;margin:8px 0 0;max-height:220px;overflow:auto"></pre></section>
-    <button class="btn secondary" id="csvBtn">Verileri CSV olarak kopyala</button>
-  </section>
-</main>
-
+<div id="app"></div>
+<div id="toast" class="toast" hidden></div>
+<script src="skolidata-algo.js"></script>
 <script>
-// ---------- settings ----------
+'use strict';
+const APP_VERSION = 'app v1.0 · algo v1';
 const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e', NUS_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e', NUS_TX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
-const ON_C = 30.5, OFF_C = 29.5;          // placeholder wear rule with hysteresis (to be replaced by the calibrator)
-let goalH = 16;
+// Clinician accounts: only a salted SHA-256 of the password is stored here (never the password itself).
+// NOTE: this is a front door for testing, not real security; real accounts need the server (master plan §6-7).
+const CLINICIANS = [{ u: 'klinisyen', salt: '060785deb17a84e5a7b5431cf4c844bb', hash: '757024313534ac340061ad41847cc77f2e50bee7e553b2dfcf3d519eb9f2002d', name: 'Klinisyen' }];
+const DEFAULT_MODEL = { version: 1, createdAt: 0, isDefault: true, Toff: 24, Ton: 33.5, gap: 9.5, thrOn: 29.7, thrOff: 27.8, tauOn: 100, tauOff: 150, lagOn: 92, lagOff: 137 };
+const DAYS_TR = ['Pz', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'];
+const MONTHS_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+const WEEKDAYS_TR = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
 
-// ---------- state ----------
-const recs = new Map();                  // index -> {t: ms, skin, rh, chip, mv}
-let mode = null, device = null, rxChar = null, buf = '', info = null, demoTimer = null;
-const $ = id => document.getElementById(id);
-
-// ---------- Bluetooth ----------
-if (!navigator.bluetooth) {
-  $('bleHint').textContent = "Bu tarayıcı Bluetooth'a bağlanamıyor. iPhone'da ücretsiz \"Bluefy\" uygulamasıyla, Android'de Chrome ile aç. Demo modu her yerde çalışır.";
+// ================= small helpers =================
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const mem = {};
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : (k in mem ? mem[k] : d); } catch (e) { return k in mem ? mem[k] : d; } }
+function lsSet(k, v) { mem[k] = v; try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function lsDel(k) { delete mem[k]; try { localStorage.removeItem(k); } catch (e) {} }
+function ssGet(k) { try { return JSON.parse(sessionStorage.getItem(k)); } catch (e) { return mem['ss' + k] || null; } }
+function ssSet(k, v) { mem['ss' + k] = v; try { sessionStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function waitFor(pred, ms) { const end = Date.now() + ms; while (Date.now() < end) { if (pred()) return true; await sleep(50); } return !!pred(); }
+const startOfDay = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const addDays = (t, n) => { const d = new Date(t); d.setDate(d.getDate() + n); return d.getTime(); };
+const dateKey = t => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const fmtHM = ms => { const h = Math.floor(ms / 3.6e6), m = Math.floor((ms % 3.6e6) / 6e4); return `${h} sa ${m} dk`; };
+const fmtH1 = ms => (ms / 3.6e6).toFixed(1).replace('.', ',');
+const fmtDate = t => { const d = new Date(t); return `${d.getDate()} ${MONTHS_TR[d.getMonth()]}`; };
+function ago(t) { if (!t) return 'henüz yok'; const s = (Date.now() - t) / 1000; if (s < 60) return 'az önce'; if (s < 3600) return Math.floor(s / 60) + ' dk önce'; if (s < 86400) return Math.floor(s / 3600) + ' sa önce'; return Math.floor(s / 86400) + ' gün önce'; }
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2600); }
+async function sha256hex(s) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
 }
-$('connectBtn').onclick = async () => {
-  if (!navigator.bluetooth) { alert("iPhone'da bu sayfayı Bluefy uygulamasında, Android'de Chrome'da aç."); return; }
+const randHex = n => [...crypto.getRandomValues(new Uint8Array(n))].map(x => x.toString(16).padStart(2, '0')).join('');
+
+// ================= storage =================
+// small things in localStorage; readings in IndexedDB (falls back to memory)
+const profiles = () => lsGet('sk.profiles', {});
+const saveProfiles = p => lsSet('sk.profiles', p);
+const getMeta = code => lsGet('sk.meta.' + code, { next: 0, lastSync: 0, mv: 0, firstSeen: Date.now() });
+const setMeta = (code, m) => lsSet('sk.meta.' + code, m);
+const getModel = code => lsGet('sk.model.' + code, null);
+const modelFor = code => getModel(code) || DEFAULT_MODEL;
+
+let DB = null, memRecs = null;
+function idb() {
+  return new Promise((res) => {
+    if (DB || memRecs) return res(DB);
+    try {
+      const r = indexedDB.open('skolidata', 1);
+      r.onupgradeneeded = () => { const st = r.result.createObjectStore('recs', { keyPath: ['code', 'idx'] }); st.createIndex('byTime', ['code', 't']); };
+      r.onsuccess = () => { DB = r.result; res(DB); };
+      r.onerror = () => { memRecs = []; res(null); };
+    } catch (e) { memRecs = []; res(null); }
+  });
+}
+async function putRecs(list) {
+  if (!list.length) return;
+  const db = await idb();
+  if (!db) { memRecs.push(...list); return; }
+  await new Promise((res) => { const tx = db.transaction('recs', 'readwrite'), st = tx.objectStore('recs'); list.forEach(r => st.put(r)); tx.oncomplete = res; tx.onerror = res; });
+  // readings arrived for these days -> their cached hours must be recomputed
+  const byCode = {};
+  list.forEach(r => { byCode[r.code] = Math.min(byCode[r.code] ?? Infinity, r.t); });
+  for (const c in byCode) { const k = dateKey(byCode[c]), cache = lsGet('sk.days.' + c, {}); for (const d in cache) if (d >= k) delete cache[d]; lsSet('sk.days.' + c, cache); }
+}
+async function getRecs(code, t0, t1) {
+  const db = await idb();
+  if (!db) return memRecs.filter(r => r.code === code && r.t >= t0 && r.t <= t1).sort((a, b) => a.t - b.t);
+  return new Promise((res) => { const q = db.transaction('recs').objectStore('recs').index('byTime').getAll(IDBKeyRange.bound([code, t0], [code, t1])); q.onsuccess = () => res(q.result); q.onerror = () => res([]); });
+}
+async function deleteCode(code) {
+  const db = await idb();
+  if (!db) { memRecs = memRecs.filter(r => r.code !== code); return; }
+  await new Promise((res) => { const tx = db.transaction('recs', 'readwrite'); tx.objectStore('recs').delete(IDBKeyRange.bound([code, 0], [code, Number.MAX_SAFE_INTEGER])); tx.oncomplete = res; tx.onerror = res; });
+}
+
+// ================= Bluetooth (protocol 2) =================
+const B = { device: null, rx: null, connected: false, info: null, chunk: null, syncing: false, live: null, log: [], writeQ: Promise.resolve(), rxBuf: new Uint8Array(0), binLeft: 0 };
+function blog(t) { B.log.push(new Date().toLocaleTimeString('tr-TR') + '  ' + t); if (B.log.length > 40) B.log.shift(); }
+function send(cmd) {
+  blog('→ ' + cmd);
+  B.writeQ = B.writeQ.then(() => B.rx ? B.rx.writeValue(new TextEncoder().encode(cmd + '\n')) : null).catch(e => blog('write error ' + e.message));
+  return B.writeQ;
+}
+async function bleConnect() {
+  if (!navigator.bluetooth) { alert("Bu tarayıcı Bluetooth'a bağlanamıyor. iPhone'da ücretsiz \"Bluefy\" uygulamasıyla, Android'de Chrome ile aç."); return false; }
   try {
-    device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'SK-' }, { services: [NUS] }], optionalServices: [NUS] });
-    device.addEventListener('gattserverdisconnected', () => { $('connNote').classList.remove('hidden'); render(); });
-    await connectGatt();
-    mode = 'live'; showHome();
-  } catch (e) { if (e && e.name !== 'NotFoundError') alert('Bağlanamadı: ' + e.message); }
-};
-$('reconnectBtn').onclick = async () => { try { await connectGatt(); } catch (e) { alert('Bağlanamadı: ' + e.message); } };
-
-async function connectGatt() {
-  const server = await device.gatt.connect();
-  const svc = await server.getPrimaryService(NUS);
-  const tx = await svc.getCharacteristic(NUS_TX);
-  rxChar = await svc.getCharacteristic(NUS_RX);
-  tx.addEventListener('characteristicvaluechanged', ev => onData(new TextDecoder().decode(ev.target.value)));
-  await tx.startNotifications();
-  $('connNote').classList.add('hidden');
-  info = null; buf = ''; pending = []; dumpAsked = false;
-  askInfo(0);                             // info first (gives the button's uptime -> real clock), then all readings
-}
-let pending = [], dumpAsked = false;
-async function askInfo(tries) {           // repeat "i" until the button answers; then ask for the dump once
-  if (info) { if (!dumpAsked) { dumpAsked = true; send('d').catch(() => {}); } return; }
-  if (tries >= 6) {                       // fallback: no info line, so time the readings from the newest one
-    const last = pending.length ? Math.max(...pending.map(l => +l.split(',')[1] || 0)) : 0;
-    info = { up: last, at: Date.now(), code: device && device.name ? device.name : '' };
-    flushPending(); dumpAsked = true; send('d').catch(() => {}); return;
+    const dev = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'SK-' }, { services: [NUS] }], optionalServices: [NUS] });
+    B.device = dev; B.live = null;
+    dev.addEventListener('gattserverdisconnected', () => {
+      if (dev !== B.device) return;            // an older button we already left
+      B.connected = false; B.syncing = false; blog('bağlantı koptu');
+      if (CAL.phase === 'off' || CAL.phase === 'on') calFail('Bağlantı koptu. Telefonu butona yakın tut ve tekrar dene.');
+      refresh();
+    });
+    const server = await B.device.gatt.connect();
+    const svc = await server.getPrimaryService(NUS);
+    const tx = await svc.getCharacteristic(NUS_TX);
+    B.rx = await svc.getCharacteristic(NUS_RX);
+    tx.addEventListener('characteristicvaluechanged', ev => { const v = ev.target.value; onBytes(new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength))); });
+    await tx.startNotifications();
+    B.connected = true; B.rxBuf = new Uint8Array(0); B.binLeft = 0;
+    blog('bağlandı: ' + (B.device.name || ''));
+    refresh();
+    return await syncAll();
+  } catch (e) {
+    if (e && e.name !== 'NotFoundError') alert('Bağlanamadı: ' + e.message);
+    B.connected = !!(B.device && B.device.gatt && B.device.gatt.connected);
+    refresh();
+    return false;
   }
-  try { await send('i'); } catch (e) {}
-  setTimeout(() => askInfo(tries + 1), 1500);
 }
-function flushPending() { const p = pending; pending = []; p.forEach(handleLine); }
-async function send(s) { logRaw('→ ' + s); if (rxChar) await rxChar.writeValue(new TextEncoder().encode(s)); }
-const APP_VERSION = 'demo v0.3';
-let rxLines = 0, errLines = 0, rawLog = [];
-function logRaw(t) { rawLog.push(new Date().toLocaleTimeString('tr-TR') + '  ' + t); if (rawLog.length > 14) rawLog.shift(); }
-
-function onData(chunk) {
-  buf += chunk;
-  let i;
-  while ((i = buf.indexOf('\n')) >= 0) { handleLine(buf.slice(0, i).trim()); buf = buf.slice(i + 1); }
+function onBytes(u8) {
+  const nb = new Uint8Array(B.rxBuf.length + u8.length); nb.set(B.rxBuf); nb.set(u8, B.rxBuf.length); B.rxBuf = nb;
+  for (;;) {
+    if (B.binLeft > 0) {
+      const n = Math.min(B.binLeft, B.rxBuf.length - (B.rxBuf.length % 8));
+      if (n < 8) break;
+      const dv = new DataView(B.rxBuf.buffer, B.rxBuf.byteOffset, n);
+      for (let o = 0; o < n; o += 8) decodeRec(dv, o);
+      B.rxBuf = B.rxBuf.slice(n); B.binLeft -= n;
+      continue;
+    }
+    const i = B.rxBuf.indexOf(10);
+    if (i < 0) break;
+    const line = new TextDecoder().decode(B.rxBuf.slice(0, i)).trim();
+    B.rxBuf = B.rxBuf.slice(i + 1);
+    if (line) handleLine(line);
+  }
+}
+function wallTime(secs) { return B.info.at - (B.info.up - secs) * 1000; }
+function decodeRec(dv, o) {
+  const c = B.chunk; const idx = c.from + c.got++;
+  const t = dv.getUint32(o, true), skin = dv.getInt16(o + 4, true), rh2 = dv.getUint8(o + 6), chip2 = dv.getUint8(o + 7);
+  if (t === 0xFFFFFFFF) return;
+  if (t === 0xFFFFFFFE || t === 0xFFFFFFFD) { c.mv = skin & 0xFFFF; return; }   // boot / battery records
+  if (idx < B.info.boot) { c.untimed++; return; }                              // from an earlier power-on we never synced
+  c.recs.push({ code: B.info.code, idx, t: wallTime(t), skin: skin === -32768 ? null : skin / 100, rh: rh2 === 255 ? null : rh2 / 2, chip: chip2 / 2 - 20 });
 }
 function handleLine(line) {
-  if (!line) return;
-  rxLines++; logRaw('← ' + line); if (line.includes('ERR')) errLines++;
+  blog('← ' + (line.length > 90 ? line.slice(0, 90) + '…' : line));
   if (line.startsWith('SkoliData')) {
-    const up = /up=(\d+)s/.exec(line), code = /SK-[0-9A-Z]+/.exec(line);
-    const first = !info;
-    info = { up: up ? +up[1] : 0, at: Date.now(), code: code ? code[0] : '' };
-    flushPending();
-    if (first && mode === 'live' && !dumpAsked) { dumpAsked = true; send('d').catch(() => {}); }
+    const g = k => { const m = new RegExp('\\b' + k + '=(\\d+)').exec(line); return m ? +m[1] : null; };
+    const code = (/SK-[0-9A-Z]{8}/.exec(line) || [''])[0], fw = (/fw[0-9.]+/.exec(line) || [''])[0];
+    if (!/ p2 /.test(line + ' ')) { B.info = { code, fw, old: true, at: Date.now() }; return; }
+    B.info = { code, fw, up: g('up'), every: g('every'), boot: g('boot'), first: g('first'), next: g('next'), mv: g('mv'), flash: g('flash'), at: Date.now() };
+    return;
+  }
+  if (line.startsWith('D ')) { const p = line.split(' '); B.chunk = { from: +p[1], count: +p[2], got: 0, recs: [], untimed: 0, done: false }; B.binLeft = +p[2] * 8; return; }
+  if (line === 'E') { if (B.chunk) finishChunk(); return; }
+  if (line.startsWith('L,') && B.info && !B.info.old) {
+    const p = line.split(',');
+    const r = { code: B.info.code, idx: +p[1], t: wallTime(+p[2]), skin: p[3] === 'ERR' ? null : +p[3], rh: p[4] === 'ERR' ? null : +p[4], chip: +p[5] };
+    B.live = r;
+    putRecs([r]);
+    const m = getMeta(r.code); if (m.next === r.idx) { m.next = r.idx + 1; setMeta(r.code, m); }
+    if (CAL.phase === 'off' || CAL.phase === 'on') CAL.buf[CAL.phase].push(r);
+    refresh();
+  }
+}
+async function finishChunk() { const c = B.chunk; await putRecs(c.recs); c.done = true; }
+async function syncAll() {
+  B.info = null; B.syncing = true; refresh();
+  for (let k = 0; k < 6 && !B.info; k++) { await send('i'); await waitFor(() => B.info, 1500); }
+  if (!B.info) { B.syncing = false; toast('Buton yanıt vermedi.'); refresh(); return false; }
+  if (B.info.old) { B.syncing = false; alert('Bu butonda eski yazılım var (' + B.info.fw + '). SkoliData_4_Button yazılımını yükle.'); refresh(); return false; }
+  const code = B.info.code, meta = getMeta(code);
+  let from = Math.max(meta.next || 0, B.info.first);
+  for (let guard = 0; guard < 200; guard++) {
+    B.chunk = null;
+    await send('d' + from);
+    const ok = await waitFor(() => B.chunk && B.chunk.done, 30000);
+    if (!ok) { blog('aktarım yarım kaldı'); break; }
+    if (B.chunk.mv) meta.mv = B.chunk.mv;
+    from = B.chunk.from + B.chunk.count; meta.next = from; setMeta(code, meta);
+    refresh();
+    if (B.chunk.count < 4000) break;
+  }
+  meta.lastSync = Date.now(); meta.mv = B.info.mv || meta.mv; meta.fw = B.info.fw; setMeta(code, meta);
+  B.syncing = false;
+  await computeDays(code, 14, true);
+  refresh();
+  return true;
+}
+
+// ================= wear hours per day (cached for finished days) =================
+const DAYCACHE = {};   // code -> {key -> day}
+async function computeDays(code, nDays = 14, force) {
+  const model = modelFor(code), meta = getMeta(code);
+  const cache = lsGet('sk.days.' + code, {});
+  const today0 = startOfDay(Date.now()), out = {};
+  for (let d = nDays - 1; d >= 0; d--) {
+    const a = addDays(today0, -d), b = addDays(today0, -d + 1), key = dateKey(a), isToday = d === 0;
+    const c = cache[key];
+    if (!isToday && c && c.modelAt === model.createdAt) { out[key] = c; continue; }
+    const recs = await getRecs(code, a - 30 * 60e3, Math.min(b, Date.now() + 60e3));
+    const day = { key, start: a, ms: 0, unsureMs: 0, dataMs: 0, segs: [], n: 0, modelAt: model.createdAt };
+    if (recs.length > 1) {
+      const r = SkoliAlgo.classify(recs, model), st = r.states;
+      for (let i = 0; i < st.length - 1; i++) {
+        const x = Math.max(st[i].t, a), y = Math.min(st[i + 1].t, b);
+        if (y <= x || st[i].gapAfter) continue;
+        day.dataMs += y - x;
+        if (st[i].unsure) day.unsureMs += y - x; else if (st[i].state === 'on') day.ms += y - x;
+      }
+      day.segs = r.segments.filter(s => s.state === 'on' && s.to > a && s.from < b).map(s => [Math.max(s.from, a), Math.min(s.to, b)]);
+      day.n = recs.filter(x => x.t >= a).length;
+    }
+    out[key] = day;
+    if (!isToday && meta.lastSync > b) cache[key] = day;     // finished day, synced after it ended
+  }
+  lsSet('sk.days.' + code, cache);
+  DAYCACHE[code] = Object.assign(DAYCACHE[code] || {}, out);
+  return DAYCACHE[code];
+}
+function daysList(code, n) { const c = DAYCACHE[code] || {}; const t0 = startOfDay(Date.now()); const arr = []; for (let d = n - 1; d >= 0; d--) { const k = dateKey(addDays(t0, -d)); arr.push(c[k] || { key: k, start: addDays(t0, -d), ms: 0, dataMs: 0, unsureMs: 0, segs: [] }); } return arr; }
+function summary(code) {
+  const p = profiles()[code] || {}, goalMs = (p.goal || 16) * 3.6e6;
+  const past = daysList(code, 15).slice(0, 14).filter(d => d.dataMs > 2 * 3.6e6);
+  const avg = past.length ? past.reduce((s, d) => s + d.ms, 0) / past.length : 0;
+  let uneven = false;
+  if (past.length >= 5) {
+    const m = avg, sd = Math.sqrt(past.reduce((s, d) => s + (d.ms - m) ** 2, 0) / past.length);
+    uneven = (m > 0 && sd / m > 0.25) || past.filter(d => d.ms < m / 2).length >= 2;
+  }
+  return { goalMs, avg, uneven, daysWithData: past.length };
+}
+
+// ================= battery estimate =================
+function battery(code) {
+  const m = getMeta(code), mv = m.mv || 0;
+  if (!mv) return { txt: 'Henüz bilinmiyor', seg: 0 };
+  if (mv >= 3150) return { txt: 'USB ile çalışıyor', seg: 5 };
+  const monthsUsed = (Date.now() - (m.firstSeen || Date.now())) / (30.4 * 864e5);
+  if (mv < 2600) return { txt: 'Pil bitmek üzere. SkoliData ile iletişime geç.', seg: 1, low: true };
+  if (mv < 2750) return { txt: 'Pil azalıyor. SkoliData ile iletişime geç.', seg: 2, low: true };
+  const left = Math.max(1, Math.round(12 - monthsUsed));
+  return { txt: `Yaklaşık ${left} ay kaldı`, seg: Math.max(3, Math.min(5, Math.ceil(left / 2.4))) };
+}
+
+// ================= session + routing =================
+let session = ssGet('sk.session');   // {role:'family', code} | {role:'clinician', u}
+let screen = 'login', params = {};
+const LIVE = new Set(['famHome', 'calib', 'clinPatient', 'raw', 'famSettings', 'famWeek', 'clinList', 'famConnect']);
+function go(s, p = {}) { screen = s; params = p; render(); window.scrollTo(0, 0); }
+function refresh() { if (LIVE.has(screen) && !(document.activeElement && document.activeElement.tagName === 'INPUT')) render(); }
+function render() { const f = SCREENS[screen] || SCREENS.login; $('#app').innerHTML = f(params); if (f.after) f.after(params); }
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const fn = ACTIONS[el.dataset.act]; if (fn) { e.preventDefault(); fn(el.dataset.arg, el); }
+});
+const backBtn = (to, label = 'Geri') => `<div class="top"><button class="back" data-act="go" data-arg="${to}" aria-label="${label}">‹ ${label}</button><span></span></div>`;
+
+// ================= screens =================
+const SCREENS = {};
+SCREENS.login = () => `<main>
+  <div style="flex:1"></div>
+  <div class="mark" aria-hidden="true"><span></span></div>
+  <div class="center"><h1>SkoliData</h1><p class="sub" style="margin-top:8px">Korse saatleri kendiliğinden kaydedilir.</p></div>
+  <div style="flex:1"></div>
+  <button class="btn korsem" data-act="famStart">Korsem</button>
+  <button class="btn klinisyen" data-act="go" data-arg="clinLogin">Klinisyen</button>
+  <p class="small center">${APP_VERSION}</p>
+</main>`;
+
+// ---------- family: first time / login ----------
+SCREENS.famConnect = () => `<main>${backBtn('login')}
+  <h1>Butonunu bağla</h1>
+  <p class="sub">Korsendeki butonu telefona yaklaştır. Bluetooth açık olsun.</p>
+  <div class="note"><b>Neden?</b>Hesabın butonunun kendi koduyla oluşturulur. E-posta ya da telefon numarası gerekmez.</div>
+  <div style="flex:1"></div>
+  ${B.syncing ? '<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>' : ''}
+  <button class="btn primary" data-act="famConnectBtn" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>
+  ${Object.keys(profiles()).length ? '<button class="btn text" data-act="go" data-arg="famLogin" style="align-self:center">Zaten hesabım var</button>' : ''}
+</main>`;
+SCREENS.famPass = p => `<main>${backBtn('famConnect')}
+  <div class="steps"><i class="on"></i><i></i><i></i><i></i></div>
+  <h1>Şifre oluştur</h1>
+  <p class="sub">Butonun: <b>${esc(p.code)}</b>. Giriş yaparken bu kodu ve şifreni kullanacaksın.</p>
+  <label class="f">Şifre (en az 8 karakter)<input class="in" id="pw1" type="password" autocomplete="new-password"></label>
+  <label class="f">Şifre tekrar<input class="in" id="pw2" type="password" autocomplete="new-password"></label>
+  <p class="err" id="err"></p>
+  <div style="flex:1"></div>
+  <button class="btn primary" data-act="famPassSave">Devam</button>
+</main>`;
+const CONSENT_TEXT = `<p><b>Ne kaydedilir?</b> Korsendeki buton, korsenin iç yüzündeki sıcaklığı ve nemi ölçer. Uygulama bunlardan korsenin günde kaç saat takıldığını hesaplar.</p>
+<p><b>Kim görür?</b> Sen. Bir klinisyenle paylaşırsan o klinisyen de görür. Bu sürümde veriler yalnızca bu telefonda saklanır.</p>
+<p><b>Amaç:</b> Korse kullanım süresini ölçen bir araştırma çalışması.</p>
+<p><b>Süre:</b> Çalışma boyunca (süreyi çalışma ekibi bildirir).</p>
+<p><b>İletişim:</b> SkoliData çalışma ekibi (iletişim bilgisi eklenecek).</p>
+<p><b>Hakların:</b> İstediğin zaman çalışmadan çekilebilir ve verilerinin silinmesini isteyebilirsin.</p>`;
+SCREENS.famConsent = p => `<main>${backBtn('famConnect')}
+  <div class="steps"><i class="on"></i><i class="on"></i><i></i><i></i></div>
+  <h1>Onay</h1>
+  <section class="card" style="display:flex;flex-direction:column;gap:10px;font-size:15px">${CONSENT_TEXT}</section>
+  <label class="check"><input type="checkbox" id="ok1">Okudum. Korse sürelerimin kaydedilmesini onaylıyorum.</label>
+  <label class="check"><input type="checkbox" id="ok2">18 yaşından küçüksem velim de onayladı.</label>
+  <div style="flex:1"></div>
+  <button class="btn primary" data-act="famConsentSave">Onayla</button>
+</main>`;
+SCREENS.famGoal = p => `<main>${backBtn('famConnect')}
+  <div class="steps"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+  <h1>Günlük hedef</h1>
+  <p class="sub">Klinisyeninin önerdiği günlük süreyi seç. Sonra değiştirebilirsin.</p>
+  <section class="card"><div class="stepper"><button data-act="goalStep" data-arg="-1" aria-label="Azalt">–</button><b id="gv">${params.goal || 16} saat</b><button data-act="goalStep" data-arg="1" aria-label="Artır">+</button></div></section>
+  <div style="flex:1"></div>
+  <button class="btn primary" data-act="famGoalSave">Devam</button>
+</main>`;
+SCREENS.famLogin = () => {
+  const codes = Object.keys(profiles());
+  return `<main>${backBtn('login')}
+  <h1>Giriş</h1>
+  <label class="f">Buton kodu<input class="in" id="lc" value="${esc(codes[0] || '')}" autocapitalize="characters" autocomplete="username"></label>
+  <label class="f">Şifre<input class="in" id="lp" type="password" autocomplete="current-password"></label>
+  <p class="err" id="err"></p>
+  <button class="btn primary" data-act="famLoginBtn">Giriş yap</button>
+  <button class="btn text" data-act="forgot" style="align-self:center">Şifremi unuttum</button>
+  <div style="flex:1"></div>
+  <button class="btn secondary" data-act="go" data-arg="famConnect">Yeni buton bağla</button>
+</main>`;
+};
+
+// ---------- calibration (family + clinician) ----------
+const CAL = { phase: null, code: null, start: 0, buf: { off: [], on: [] }, result: null, timer: null, by: 'family' };
+const CAL_S = 300;
+SCREENS.calib = () => {
+  const clin = CAL.by === 'clinician', back = clin ? 'clinPatient' : 'famHome';
+  const live = clin && B.live ? `<p class="small center">Canlı: ${B.live.skin ?? 'ERR'} °C · nem %${B.live.rh ?? '–'}</p>` : '';
+  const conn = B.connected ? '' : `<div class="note"><b>Buton bağlı değil</b>Kalibrasyon için telefon butona bağlı kalmalı.</div><button class="btn primary" data-act="connect">Butona bağlan</button>`;
+  const ring = (frac, label) => `<div class="ringwrap" role="img" aria-label="${label}"><svg viewBox="0 0 220 220" aria-hidden="true"><circle cx="110" cy="110" r="100" fill="none" stroke="#E8F1FF" stroke-width="16"/><circle cx="110" cy="110" r="100" fill="none" stroke="#1E5EFF" stroke-width="16" stroke-linecap="round" stroke-dasharray="${(628.3 * frac).toFixed(1)} 628.3"/></svg><div class="ringtxt"><div class="timer">${label}</div></div></div>`;
+  const left = () => { const s = Math.max(0, CAL_S - Math.floor((Date.now() - CAL.start) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  const frac = () => Math.min(1, (Date.now() - CAL.start) / (CAL_S * 1000));
+  if (!CAL.phase) return `<main>${backBtn(back)}
+    <h1>Kalibrasyon</h1>
+    <p class="sub">Buton, korsenin takılı ve çıkarılmış halini öğrenir. Toplam 10 dakika sürer.</p>
+    <section class="card list">
+      <div class="li"><span class="k">1. Korse çıkarılmış</span><span class="v">5 dk</span></div>
+      <div class="li"><span class="k">2. Korse takılı</span><span class="v">5 dk</span></div>
+    </section>
+    <div class="note"><b>Önemli</b>Normal oda sıcaklığında yap (sıcak araba, güneş ya da kalorifer yanında değil). Telefon butonun yakınında kalsın.</div>
+    <div style="flex:1"></div>${conn}
+    <button class="btn primary" data-act="calStart" ${B.connected ? '' : 'disabled'}>Başla</button></main>`;
+  if (CAL.phase === 'off') return `<main><div class="steps"><i class="on"></i><i></i></div>
+    <h1>Korseyi çıkar</h1><p class="sub">Korseyi çıkar ve tenine değmeyecek şekilde açık bir yere koy. Butonu elleme.</p>
+    ${ring(frac(), left())}${live}<div style="flex:1"></div>
+    <button class="btn secondary" data-act="calCancel">Vazgeç</button></main>`;
+  if (CAL.phase === 'wait') return `<main><div class="steps"><i class="on"></i><i class="on"></i></div>
+    <h1>Şimdi korseyi tak</h1><p class="sub">Korseyi her zamanki gibi tak. Taktıktan sonra aşağıdaki düğmeye bas ve 5 dakika normal otur.</p>
+    <div style="flex:1"></div>${conn}<button class="btn primary" data-act="calOnStart" ${B.connected ? '' : 'disabled'}>Taktım, başlat</button>
+    <button class="btn secondary" data-act="calCancel">Vazgeç</button></main>`;
+  if (CAL.phase === 'on') return `<main><div class="steps"><i class="on"></i><i class="on"></i></div>
+    <h1>Korse takılı</h1><p class="sub">Normal otur ve korseyi oynatma.</p>
+    ${ring(frac(), left())}${live}<div style="flex:1"></div>
+    <button class="btn secondary" data-act="calCancel">Vazgeç</button></main>`;
+  const r = CAL.result || {};
+  const det = clin && r.details ? `<section class="card small" style="text-align:left">Oda (çıkarılmış): <b>${r.details.Toff} °C</b> · Takılı: <b>${r.details.Ton} °C</b> · Fark: <b>${r.details.gap} °C</b><br>Isınma süresi τ: <b>${Math.round(r.details.tauOn || 0)} s</b> · Soğuma τ: <b>${Math.round(r.details.tauOff || 0)} s</b><br>Gürültü: ${(Math.max(r.details.rmsOn || 0, r.details.rmsOff || 0)).toFixed(2)} °C${r.ok ? `<br>Eşikler: takılı ≥ ${r.model.thrOn.toFixed(2)} °C, çıkarıldı ≤ ${r.model.thrOff.toFixed(2)} °C` : ''}</section>` : '';
+  return `<main><div style="flex:1"></div>
+    <div class="mark" aria-hidden="true"><span></span></div>
+    <h1 class="center">${r.ok ? 'Kalibrasyon tamamlandı' : 'Kalibrasyon başarısız'}</h1>
+    <p class="sub center">${esc(r.ok ? 'Buton artık korsenin takılı olup olmadığını senin korsene göre anlıyor.' : (r.reason || '') + ' Lütfen tekrar dene.')}</p>
+    ${det}<div style="flex:1"></div>
+    ${r.ok ? `<button class="btn primary" data-act="go" data-arg="${back}">Bitti</button>` : `<button class="btn primary" data-act="calReset">Tekrar dene</button><button class="btn secondary" data-act="go" data-arg="${back}">Sonra</button>`}
+  </main>`;
+};
+function calTick() {
+  clearTimeout(CAL.timer);
+  if (CAL.phase !== 'off' && CAL.phase !== 'on') return;
+  if (Date.now() - CAL.start >= CAL_S * 1000) {
+    if (CAL.phase === 'off') { CAL.phase = 'wait'; render(); return; }
+    CAL.phase = 'done';
+    const res = SkoliAlgo.calibrate(CAL.buf.off, CAL.buf.on, { phaseSeconds: CAL_S, everyS: (B.info && B.info.every) || 2 });
+    CAL.result = res;
+    const raw = { at: Date.now(), by: CAL.by, off: CAL.buf.off.map(r => [r.t, r.skin, r.rh]), on: CAL.buf.on.map(r => [r.t, r.skin, r.rh]), result: { ok: res.ok, code: res.code, details: res.details } };
+    lsSet('sk.calraw.' + CAL.code, raw);
+    if (res.ok) {
+      const model = Object.assign({}, res.model, { by: CAL.by });
+      lsSet('sk.model.' + CAL.code, model);
+      const hist = lsGet('sk.calhist.' + CAL.code, []); hist.push({ at: model.createdAt, by: CAL.by, Toff: model.Toff, Ton: model.Ton, tauOn: model.tauOn }); lsSet('sk.calhist.' + CAL.code, hist.slice(-20));
+      lsSet('sk.days.' + CAL.code, {});
+      computeDays(CAL.code, 14, true).then(refresh);
+    }
     render(); return;
   }
-  if (line.startsWith('index') || line === 'end') { render(); return; }
-  const p = line.split(',');
-  if (p.length < 6) return;
-  if (!info) { pending.push(line); return; }   // keep it until we know the button's clock
-  const idx = +p[0], secs = +p[1];
-  recs.set(idx, {
-    t: info.at - (info.up - secs) * 1000,
-    skin: p[2] === 'ERR' ? null : +p[2], rh: p[3] === 'ERR' ? null : +p[3], chip: +p[4], mv: +p[5]
+  if (screen === 'calib') render();
+  CAL.timer = setTimeout(calTick, 1000);
+}
+function calFail(msg) { clearTimeout(CAL.timer); CAL.phase = 'done'; CAL.result = { ok: false, code: 'disconnected', reason: msg }; if (screen === 'calib') render(); }
+
+// ---------- family home ----------
+function ringSvg(frac) { return `<svg viewBox="0 0 220 220" aria-hidden="true"><defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5AA2FF"/><stop offset="1" stop-color="#1E5EFF"/></linearGradient></defs><circle cx="110" cy="110" r="100" fill="none" stroke="#E8F1FF" stroke-width="20"/><circle cx="110" cy="110" r="100" fill="none" stroke="url(#rg)" stroke-width="20" stroke-linecap="round" stroke-dasharray="${(628.3 * frac).toFixed(1)} 628.3"/></svg>`; }
+function nowState(code) {
+  const model = modelFor(code);
+  const r = B.live && B.live.code === code && Date.now() - B.live.t < 120e3 ? B.live : null;
+  if (!r || r.skin === null) return null;
+  const today = DAYCACHE[code] && DAYCACHE[code][dateKey(Date.now())];
+  const lastSeg = today && today.segs.length ? today.segs[today.segs.length - 1] : null;
+  if (r.skin > model.Ton + SkoliAlgo.CFG.hotterThanSkinC) return 'unsure';
+  if (lastSeg && Date.now() - lastSeg[1] < 180e3) return 'on';
+  return r.skin >= model.thrOn ? 'on' : 'off';
+}
+SCREENS.famHome = () => {
+  const code = session.code, p = profiles()[code] || {}, goalMs = (p.goal || 16) * 3.6e6;
+  const days = daysList(code, 7), today = days[6], meta = getMeta(code), sm = summary(code), model = getModel(code);
+  const st = B.connected ? nowState(code) : null;
+  const status = B.syncing ? ['wait', 'Buton okunuyor…'] : !B.connected ? ['wait', 'Güncellemek için butona bağlan.'] : st === 'on' ? ['', 'Korsen takılı. Süper gidiyorsun!'] : st === 'off' ? ['off', 'Korse şu an dinleniyor.'] : st === 'unsure' ? ['wait', 'Hava çok sıcak, şu an emin değiliz.'] : ['wait', 'Butondan veri bekleniyor…'];
+  // this week, Monday first
+  const t0 = startOfDay(Date.now()), dow = (new Date().getDay() + 6) % 7;
+  const wk = [0, 1, 2, 3, 4, 5, 6].map(i => { const t = addDays(t0, i - dow), k = dateKey(t), d = (DAYCACHE[code] || {})[k]; return { t, k, d, label: DAYS_TR[new Date(t).getDay()], isToday: i === dow, future: i > dow }; });
+  const dots = wk.map(w => { const done = w.d && w.d.ms >= goalMs; const cls = w.isToday ? 'today' + (done ? ' done' : '') : w.future ? '' : done ? 'done' : (w.d && w.d.dataMs > 0 ? 'miss' : ''); return `<div class="wd ${cls}"><span></span><span>${w.label}</span></div>`; }).join('');
+  const goalNote = p.goalNote && Date.now() - p.goalNote.at < 3 * 864e5 ? `<div class="note"><b>Yeni günlük hedefin: ${p.goalNote.to} saat</b>Klinisyenin günlük hedefini ${p.goalNote.from} saatten ${p.goalNote.to} saate değiştirdi. Bu not 3 gün içinde kaybolacak.</div>` : '';
+  const calNote = !model ? `<div class="note"><b>Kalibrasyon önerilir</b>10 dakikalık kalibrasyonla saatler senin korsene göre daha doğru hesaplanır. <button class="btn text" style="min-height:36px;padding:0" data-act="calOpen" data-arg="family">Şimdi yap</button></div>` : '';
+  const unevenNote = sm.uneven ? `<div class="note">Bu hafta günlerin biraz inişli çıkışlı. Her gün benzer sürede takmayı dene.</div>` : '';
+  const bat = battery(code), batNote = bat.low ? `<div class="note"><b>Pil</b>${esc(bat.txt)}</div>` : '';
+  const d = new Date();
+  return `<main>
+  <header class="row" style="align-items:flex-end">
+    <div><div class="sub">${d.getDate()} ${MONTHS_TR[d.getMonth()]} ${WEEKDAYS_TR[d.getDay()]}</div><h1>Bugün</h1></div>
+    <button class="btn text" data-act="go" data-arg="famSettings">Ayarlar</button>
+  </header>
+  ${goalNote}${batNote}
+  <div class="ringwrap" role="img" aria-label="Bugün ${fmtHM(today.ms)} takıldı, hedef ${p.goal || 16} saat">${ringSvg(Math.min(1, today.ms / goalMs))}
+    <div class="ringtxt"><div class="big"><b>${Math.floor(today.ms / 3.6e6)}</b><i>sa</i><b>${Math.floor((today.ms % 3.6e6) / 6e4)}</b><i>dk</i></div><div class="goal">Hedef ${p.goal || 16} sa</div></div></div>
+  <div class="pill"><span class="dot ${status[0]}"></span><span>${status[1]}</span></div>
+  ${!B.connected ? '<button class="btn primary" data-act="connect">Butona bağlan</button>' : ''}
+  <section class="card"><div class="row"><b>Bu hafta</b><span class="small">${wk.filter(w => w.d && w.d.ms >= goalMs).length} gün hedefte</span></div><div class="week">${dots}</div></section>
+  ${calNote}${unevenNote}
+  <div class="grid2"><button class="btn secondary" data-act="go" data-arg="famWeek">Haftam</button><button class="btn secondary" data-act="calOpen" data-arg="family">Kalibrasyon</button></div>
+  <p class="upd">Son güncelleme: ${ago(meta.lastSync && B.live ? Math.max(meta.lastSync, B.live.t) : meta.lastSync)}</p>
+</main>`;
+};
+SCREENS.famHome.after = () => { const code = session && session.code; if (code && !DAYCACHE[code]) computeDays(code).then(refresh); };
+
+// week map + bars (shared by family "Haftam" and the clinician page)
+function barsSvg(days, goalMs, labelsEvery = 1) {
+  const W = 340, H = 150, n = days.length, bw = W / n, max = Math.max(goalMs * 1.15, ...days.map(d => d.ms), 3.6e6);
+  const y = v => H - 22 - (v / max) * (H - 32);
+  let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Günlük saatler">`;
+  days.forEach((d, i) => { const h = H - 22 - y(d.ms); s += `<rect x="${i * bw + bw * 0.18}" y="${y(d.ms)}" width="${bw * 0.64}" height="${Math.max(0, h)}" rx="${Math.min(6, bw * 0.2)}" fill="${d.ms >= goalMs ? '#1E5EFF' : '#A9C8FF'}"/>`; if (i % labelsEvery === 0) s += `<text x="${i * bw + bw / 2}" y="${H - 6}" font-size="11" font-weight="700" fill="#5B6987" text-anchor="middle">${DAYS_TR[new Date(d.start).getDay()]}</text>`; });
+  s += `<line x1="0" x2="${W}" y1="${y(goalMs)}" y2="${y(goalMs)}" stroke="#0B1F44" stroke-dasharray="4 4" stroke-width="1.2"/><text x="${W - 2}" y="${y(goalMs) - 4}" font-size="11" font-weight="700" fill="#0B1F44" text-anchor="end">hedef ${goalMs / 3.6e6} sa</text></svg>`;
+  return s;
+}
+function weekMapSvg(days) {
+  const W = 340, rowH = 18, H = days.length * rowH + 20, x0 = 28, w = W - x0;
+  let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Korsenin günün hangi saatlerinde takıldığı">`;
+  [0, 6, 12, 18, 24].forEach(h => s += `<text x="${x0 + w * h / 24}" y="${H - 4}" font-size="10" fill="#5B6987" text-anchor="${h === 24 ? 'end' : h === 0 ? 'start' : 'middle'}">${String(h).padStart(2, '0')}</text>`);
+  days.forEach((d, i) => {
+    const yy = i * rowH;
+    s += `<text x="0" y="${yy + 13}" font-size="11" font-weight="700" fill="#5B6987">${DAYS_TR[new Date(d.start).getDay()]}</text><rect x="${x0}" y="${yy + 3}" width="${w}" height="${rowH - 6}" rx="4" fill="#E8F1FF"/>`;
+    d.segs.forEach(([a, b]) => { const xa = x0 + w * (a - d.start) / 864e5, xb = x0 + w * (b - d.start) / 864e5; s += `<rect x="${xa.toFixed(1)}" y="${yy + 3}" width="${Math.max(1, xb - xa).toFixed(1)}" height="${rowH - 6}" rx="3" fill="#1E5EFF"/>`; });
   });
-  render();
+  return s + '</svg>';
 }
-
-// ---------- demo data ----------
-$('demoBtn').onclick = () => { mode = 'demo'; makeDemo(); showHome(); demoTimer = setInterval(() => { addDemoPoint(Date.now()); render(); }, 5000); };
-function demoTemp(t) {
-  const d = new Date(t), h = d.getHours() + d.getMinutes() / 60;
-  const worn = (h < 7.3) || (h >= 8.1 && h < 12.4) || (h >= 13.1 && h < 16.0) || h >= 20.5;
-  return worn ? 33.6 + Math.sin(t / 9e5) * 0.6 : 23.5 + Math.sin(t / 2e6) * 0.8;
-}
-let demoIdx = 0;
-function addDemoPoint(t) {
-  const skin = demoTemp(t);
-  recs.set(demoIdx++, { t, skin: +skin.toFixed(2), rh: skin > 30 ? 58 + Math.random() * 6 : 41 + Math.random() * 3, chip: skin > 30 ? 29 : 23.4, mv: 2840 });
-}
-function makeDemo() {
-  const now = Date.now(), mid = new Date(); mid.setHours(0, 0, 0, 0);
-  for (let t = mid.getTime(); t <= now; t += 60000) addDemoPoint(t);
-  info = { up: 0, at: now, code: 'SK-DEMO0000' };
-}
-
-// ---------- wear logic ----------
-function sortedRecs() { return [...recs.values()].filter(r => r.skin !== null).sort((a, b) => a.t - b.t); }
-function wornFlags(list) {
-  let on = false;
-  return list.map(r => (on = on ? r.skin >= OFF_C : r.skin >= ON_C));
-}
-function wornMsSince(list, flags, from) {
-  let ms = 0;
-  for (let i = 0; i < list.length; i++) {
-    if (!flags[i] || list[i].t < from) continue;
-    const next = i + 1 < list.length ? list[i + 1].t : Math.min(Date.now(), list[i].t + 120000);
-    ms += Math.min(next - list[i].t, 300000);          // gaps longer than 5 min aren't counted
-  }
-  return ms;
-}
-
-// ---------- UI ----------
-function showHome() { $('welcome').classList.add('hidden'); $('home').classList.remove('hidden'); buildWeek(); render(); setInterval(render, 30000); }
-$('detailsBtn').onclick = () => {
-  const d = $('details'), open = d.classList.toggle('hidden') === false;
-  $('detailsBtn').setAttribute('aria-expanded', open); render();
+SCREENS.famWeek = () => {
+  const code = session.code, p = profiles()[code] || {}, goalMs = (p.goal || 16) * 3.6e6, days = daysList(code, 7);
+  const withData = days.filter(d => d.dataMs > 0), avg = withData.length ? withData.reduce((s, d) => s + d.ms, 0) / withData.length : 0;
+  return `<main>${backBtn('famHome')}
+  <h1>Haftam</h1>
+  <section class="card">${barsSvg(days, goalMs)}</section>
+  <div class="grid2"><div class="card stat"><span>Ortalama</span><b>${fmtH1(avg)} sa</b></div><div class="card stat"><span>Hedefte</span><b>${days.filter(d => d.ms >= goalMs).length} / 7 gün</b></div></div>
+  <section class="card"><b>Ne zaman takıldı?</b><p class="small" style="margin:4px 0 8px">Mavi alanlar korsenin takılı olduğu saatler.</p>${weekMapSvg(days)}</section>
+</main>`;
 };
-$('gMinus').onclick = () => { goalH = Math.max(1, goalH - 1); render(); };
-$('gPlus').onclick = () => { goalH = Math.min(24, goalH + 1); render(); };
-$('csvBtn').onclick = async () => {
-  const rows = ['time,skin_C,humidity_pct,chip_C,supply_mV'].concat([...recs.values()].sort((a, b) => a.t - b.t)
-    .map(r => [new Date(r.t).toISOString(), r.skin ?? 'ERR', r.rh ?? 'ERR', r.chip, r.mv].join(',')));
-  try { await navigator.clipboard.writeText(rows.join('\n')); alert(rows.length - 1 + ' satır kopyalandı.'); }
-  catch { alert('Kopyalanamadı.'); }
+SCREENS.famSettings = () => {
+  const code = session.code, p = profiles()[code] || {}, bat = battery(code), model = getModel(code);
+  return `<main>${backBtn('famHome')}
+  <h1>Ayarlar</h1>
+  <section class="card list">
+    <div class="li"><span class="k">Günlük hedef</span><span class="v">${p.goal || 16} saat</span></div>
+    <div class="stepper" style="padding:6px 0 10px"><button data-act="famGoalAdj" data-arg="-1" aria-label="Azalt">–</button><span class="small">Hedefi değiştir</span><button data-act="famGoalAdj" data-arg="1" aria-label="Artır">+</button></div>
+    <div class="li"><span class="k">Butonum</span><span class="v">${esc(code)}</span></div>
+    <div class="li" style="flex-direction:column;align-items:stretch"><div class="row"><span class="k">Pil</span><span class="v">${esc(bat.txt)}</span></div><div class="gauge" aria-hidden="true">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= bat.seg ? 'on' : ''}"></i>`).join('')}</div></div>
+    <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model ? fmtDate(model.createdAt) : 'yapılmadı'}</span></div>
+  </section>
+  <section class="card list">
+    <button class="li" data-act="showConsent"><span class="k">Gizlilik ve onay</span><span class="v">›</span></button>
+    <div class="li"><span class="k">İletişim</span><span class="v">SkoliData ekibi</span></div>
+    <div class="li"><span class="k">Sürüm</span><span class="v">${APP_VERSION}</span></div>
+  </section>
+  <button class="btn secondary" data-act="logout">Çıkış yap</button>
+  <button class="btn text" data-act="famDelete" style="align-self:center">Hesabı ve verileri sil</button>
+</main>`;
+};
+SCREENS.consentView = () => `<main>${backBtn(session && session.role === 'family' ? 'famSettings' : 'login')}<h1>Gizlilik ve onay</h1><section class="card" style="display:flex;flex-direction:column;gap:10px;font-size:15px">${CONSENT_TEXT}</section></main>`;
+
+// ---------- clinician ----------
+SCREENS.clinLogin = () => `<main>${backBtn('login')}
+  <h1>Klinisyen girişi</h1>
+  <label class="f">Kullanıcı adı<input class="in" id="cu" autocapitalize="none" autocomplete="username"></label>
+  <label class="f">Şifre<input class="in" id="cp" type="password" autocomplete="current-password"></label>
+  <p class="err" id="err"></p>
+  <button class="btn primary" data-act="clinLoginBtn">Giriş yap</button>
+  <button class="btn text" data-act="forgot" style="align-self:center">Şifremi unuttum</button>
+  <div style="flex:1"></div>
+  <p class="small center">Klinisyen hesapları SkoliData tarafından onaylanır.</p>
+</main>`;
+function knownCodes() {
+  const set = new Set(Object.keys(profiles()));
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('sk.meta.')) set.add(k.slice(8)); } } catch (e) { Object.keys(mem).filter(k => k.startsWith('sk.meta.')).forEach(k => set.add(k.slice(8))); }
+  return [...set].sort();
+}
+function miniBars(code, goalMs) {
+  const days = daysList(code, 8).slice(0, 7), max = Math.max(goalMs, ...days.map(d => d.ms), 1);
+  return `<svg width="70" height="26" viewBox="0 0 70 26" aria-hidden="true">${days.map((d, i) => { const h = Math.max(1.5, 24 * d.ms / max); return `<rect x="${i * 10}" y="${26 - h}" width="7" height="${h}" rx="2" fill="${d.ms >= goalMs ? '#1E5EFF' : '#A9C8FF'}"/>`; }).join('')}</svg>`;
+}
+SCREENS.clinList = () => {
+  const codes = knownCodes(), P = profiles();
+  const rows = codes.map(c => { const s = summary(c), g = (P[c] && P[c].goal) || 16; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(c)}</span><br><span class="small">${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven ? '<span class="chip">Düzensiz</span>' : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
+  return `<main>
+  <header class="row"><div><div class="sub">${esc((CLINICIANS.find(x => x.u === session.u) || {}).name || '')} <span class="chip">Doğrulanmış</span></div><h1>Hastalarım</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
+  <section class="card list">${rows || '<p class="small">Bu telefonda henüz kayıtlı buton yok. Klinikte butonu bağlayarak başla.</p>'}</section>
+  ${B.syncing ? '<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>' : ''}
+  <button class="btn secondary" data-act="clinConnect">Buton bağla</button>
+  <p class="small">Bu sürümde yalnızca bu telefona senkronize edilen butonlar görünür. Sunucu bağlantısı sonraki adım.</p>
+</main>`;
+};
+SCREENS.clinList.after = () => { knownCodes().forEach(c => { if (!DAYCACHE[c]) computeDays(c).then(refresh); }); };
+SCREENS.clinPatient = p => {
+  const code = p.code, P = profiles(), prof = P[code] || {}, g = prof.goal || 16, goalMs = g * 3.6e6, s = summary(code);
+  const days = daysList(code, 14), model = getModel(code), meta = getMeta(code);
+  const hist = (prof.goalHistory || []).slice().reverse().map(h => `<div class="li"><span class="k">${h.to} sa</span><span class="v">${h.by === 'clinician' ? 'klinisyen' : 'aile'} · ${fmtDate(h.at)}</span></div>`).join('');
+  const isLive = B.connected && B.info && B.info.code === code;
+  return `<main>${backBtn('clinList', 'Hastalarım')}
+  <h1>${esc(code)}</h1>
+  <div class="grid2"><div class="card stat"><span>14 gün ortalama</span><b>${fmtH1(s.avg)} sa</b></div><div class="card stat"><span>Hedef</span><b>${g} sa</b></div></div>
+  ${s.uneven ? '<div class="note"><b>Düzensiz</b>Son 14 günde günlük süreler arasında büyük fark var.</div>' : ''}
+  <section class="card"><b>Son 14 gün</b>${barsSvg(days, goalMs, 1)}</section>
+  <section class="card"><b>Haftalık harita</b><p class="small" style="margin:4px 0 8px">Son 7 gün, takılı saatler mavi.</p>${weekMapSvg(days.slice(7))}</section>
+  <section class="card"><div class="row"><b>Hedefi değiştir</b></div><div class="stepper" style="margin-top:10px"><button data-act="clinGoal" data-arg="-1" aria-label="Azalt">–</button><b>${g} saat</b><button data-act="clinGoal" data-arg="1" aria-label="Artır">+</button></div><p class="small" style="margin-top:8px">Değişiklik aileye bildirilir ve 3 gün boyunca ana ekranda görünür.</p></section>
+  <section class="card list"><div class="li"><span class="k">Hedef geçmişi</span><span></span></div>${hist || '<p class="small">Henüz değişiklik yok.</p>'}</section>
+  <section class="card list">
+    <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model ? fmtDate(model.createdAt) + ' · ' + (model.by === 'clinician' ? 'klinisyen' : 'aile') : 'yapılmadı'}</span></div>
+    <div class="li"><span class="k">Son senkron</span><span class="v">${ago(meta.lastSync)}</span></div>
+    <div class="li"><span class="k">Pil</span><span class="v">${esc(battery(code).txt)}</span></div>
+  </section>
+  ${isLive ? '' : `<button class="btn secondary" data-act="clinConnect">Butona bağlan ve senkronize et</button>`}
+  <button class="btn primary" data-act="calOpen" data-arg="clinician" ${isLive ? '' : 'disabled'}>Kalibrasyon yap</button>
+  <button class="btn text" data-act="openRaw" data-arg="${esc(code)}" style="align-self:center">Ham veri (geliştirici)</button>
+</main>`;
+};
+SCREENS.clinPatient.after = p => { if (!DAYCACHE[p.code]) computeDays(p.code).then(refresh); };
+SCREENS.raw = p => {
+  const code = p.code, meta = getMeta(code), model = getModel(code), r = B.live && B.live.code === code ? B.live : null;
+  return `<main>${backBtn('clinPatient', code)}
+  <h1>Ham veri</h1>
+  <div class="note"><b>Geliştirici ekranı</b>Ailelere gösterilmez.</div>
+  <section class="card grid2">
+    <div class="stat"><span>Ten tarafı</span><b>${r && r.skin !== null ? r.skin.toFixed(2) + ' °C' : '–'}</b></div>
+    <div class="stat"><span>Nem</span><b>${r && r.rh !== null ? Math.round(r.rh) + ' %' : '–'}</b></div>
+    <div class="stat"><span>Çip (kapak)</span><b>${r ? r.chip.toFixed(1) + ' °C' : '–'}</b></div>
+    <div class="stat"><span>Besleme</span><b>${meta.mv ? (meta.mv / 1000).toFixed(2) + ' V' : '–'}</b></div>
+  </section>
+  <section class="card"><b>Son 6 saat</b><div id="rawChart">${RAWCHART.code === code && RAWCHART.html ? RAWCHART.html : '<p class="small">Yükleniyor…</p>'}</div></section>
+  <section class="card small">${model ? `Kalibrasyon: oda ${model.Toff.toFixed(2)} °C, takılı ${model.Ton.toFixed(2)} °C, eşik ≥${model.thrOn.toFixed(2)} / ≤${model.thrOff.toFixed(2)} °C, τ ısınma ${Math.round(model.tauOn)} s, τ soğuma ${Math.round(model.tauOff)} s` : 'Kalibrasyon yok: varsayılan eşikler (29,7 / 27,8 °C) kullanılıyor.'}<br>Yazılım: ${esc(meta.fw || '–')} · sıradaki kayıt: ${meta.next}</section>
+  <div class="grid2"><button class="btn secondary" data-act="csvDay" data-arg="${esc(code)}">24 saat CSV</button><button class="btn secondary" data-act="csvCal" data-arg="${esc(code)}">Kalibrasyon CSV</button></div>
+  <section class="card"><b>Bluetooth günlüğü</b><pre class="log">${esc(APP_VERSION + '\n' + B.log.join('\n'))}</pre></section>
+</main>`;
+};
+const RAWCHART = { code: null, html: '', at: 0 };
+SCREENS.raw.after = async p => {
+  if (RAWCHART.code === p.code && Date.now() - RAWCHART.at < 10000) return;   // redraw at most every 10 s
+  RAWCHART.code = p.code; RAWCHART.at = Date.now();
+  const recs = (await getRecs(p.code, Date.now() - 6 * 3.6e6, Date.now() + 60e3)).filter(r => r.skin !== null);
+  const el = $('#rawChart'); if (!el) return;
+  if (recs.length < 2) { RAWCHART.html = el.innerHTML = '<p class="small">Veri yok.</p>'; return; }
+  const model = modelFor(p.code), W = 340, H = 140, t0 = Date.now() - 6 * 3.6e6;
+  const step = Math.max(1, Math.floor(recs.length / 400)), pts = recs.filter((_, i) => i % step === 0);
+  const lo = Math.min(model.thrOff - 2, ...pts.map(r => r.skin)), hi = Math.max(model.thrOn + 2, ...pts.map(r => r.skin));
+  const X = t => (W * (t - t0) / (6 * 3.6e6)).toFixed(1), Y = v => (H - 8 - (H - 16) * (v - lo) / (hi - lo)).toFixed(1);
+  RAWCHART.html = el.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Son 6 saatlik sıcaklık"><line x1="0" x2="${W}" y1="${Y(model.thrOn)}" y2="${Y(model.thrOn)}" stroke="#0B1F44" stroke-dasharray="4 4"/><line x1="0" x2="${W}" y1="${Y(model.thrOff)}" y2="${Y(model.thrOff)}" stroke="#5B6987" stroke-dasharray="2 4"/><polyline fill="none" stroke="#1E5EFF" stroke-width="2" points="${pts.map(r => X(r.t) + ',' + Y(r.skin)).join(' ')}"/><text x="2" y="12" font-size="10" fill="#5B6987">${hi.toFixed(1)} °C</text><text x="2" y="${H - 2}" font-size="10" fill="#5B6987">${lo.toFixed(1)} °C</text></svg>`;
 };
 
-const DAYS = ['Pz', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'];
-function buildWeek() {
-  const today = new Date().getDay(), order = [1, 2, 3, 4, 5, 6, 0];
-  $('week').innerHTML = order.map(d => {
-    const cls = d === today ? 'today' : '';
-    return `<div class="wd ${cls}"><span></span><span>${DAYS[d]}</span></div>`;
-  }).join('');
+// ================= actions =================
+const ACTIONS = {
+  go: s => go(s, s === 'clinPatient' || s === 'raw' ? params : {}),
+  connect: async () => {
+    await bleConnect();
+    if (session && session.role === 'family' && B.info && B.info.code && B.info.code !== session.code) alert(`Bu buton (${B.info.code}) senin hesabına ait değil. Kendi butonuna bağlan.`);
+  },
+  famStart: () => { const P = profiles(); if (session && session.role === 'family' && P[session.code]) return go('famHome'); go(Object.keys(P).length ? 'famLogin' : 'famConnect'); },
+  famConnectBtn: async () => {
+    const ok = await bleConnect(); if (!ok || !B.info) return;
+    const code = B.info.code, P = profiles();
+    if (P[code]) { toast('Bu butonun hesabı var. Giriş yap.'); go('famLogin'); return; }
+    go('famPass', { code });
+  },
+  famPassSave: async () => {
+    const a = $('#pw1').value, b = $('#pw2').value;
+    if (a.length < 8) { $('#err').textContent = 'Şifre en az 8 karakter olmalı.'; return; }
+    if (a !== b) { $('#err').textContent = 'Şifreler aynı değil.'; return; }
+    const salt = randHex(16);
+    params.pw = { salt, hash: await sha256hex(salt + ':' + params.code + ':' + a) };
+    go('famConsent', params);
+  },
+  famConsentSave: () => {
+    if (!$('#ok1').checked || !$('#ok2').checked) { toast('Devam etmek için iki kutuyu da işaretle.'); return; }
+    params.consentAt = Date.now(); go('famGoal', params);
+  },
+  goalStep: d => { params.goal = Math.min(23, Math.max(1, (params.goal || 16) + +d)); $('#gv').textContent = params.goal + ' saat'; },
+  famGoalSave: () => {
+    const P = profiles(), goal = params.goal || 16;
+    P[params.code] = { pwSalt: params.pw.salt, pwHash: params.pw.hash, consentAt: params.consentAt, consentVersion: 'v1-taslak', goal, goalHistory: [{ to: goal, by: 'family', at: Date.now() }], createdAt: Date.now() };
+    saveProfiles(P);
+    const m = getMeta(params.code); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(params.code, m);
+    session = { role: 'family', code: params.code }; ssSet('sk.session', session);
+    CAL.phase = null; CAL.code = params.code; CAL.by = 'family';
+    go('calib');
+  },
+  famLoginBtn: async () => {
+    const code = $('#lc').value.trim().toUpperCase(), pw = $('#lp').value, P = profiles();
+    if (!P[code]) { $('#err').textContent = 'Bu buton kodu bu telefonda kayıtlı değil.'; return; }
+    if (await sha256hex(P[code].pwSalt + ':' + code + ':' + pw) !== P[code].pwHash) { $('#err').textContent = 'Şifre hatalı.'; return; }
+    session = { role: 'family', code }; ssSet('sk.session', session); go('famHome');
+  },
+  forgot: () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş.'),
+  famGoalAdj: d => { const P = profiles(), p = P[session.code]; const to = Math.min(23, Math.max(1, (p.goal || 16) + +d)); if (to === p.goal) return; p.goalHistory = (p.goalHistory || []).concat({ from: p.goal, to, by: 'family', at: Date.now() }); p.goal = to; saveProfiles(P); render(); },
+  showConsent: () => go('consentView'),
+  logout: () => { session = null; ssSet('sk.session', null); go('login'); },
+  famDelete: async () => {
+    if (!confirm('Bu telefondaki hesabın ve tüm ölçümler silinecek. Emin misin?')) return;
+    const c = session.code, P = profiles(); delete P[c]; saveProfiles(P);
+    ['sk.meta.', 'sk.model.', 'sk.days.', 'sk.calraw.', 'sk.calhist.'].forEach(k => lsDel(k + c));
+    await deleteCode(c); delete DAYCACHE[c];
+    session = null; ssSet('sk.session', null); go('login'); toast('Silindi.');
+  },
+  calOpen: by => { CAL.by = by; CAL.code = by === 'clinician' ? params.code : session.code; CAL.phase = null; CAL.result = null; go('calib', params); },
+  calStart: () => {
+    if (!B.connected || !B.info) return;
+    if (B.info.code !== CAL.code) { alert(`Bağlı buton (${B.info.code}) bu hesaba ait değil (${CAL.code}).`); return; }
+    CAL.buf = { off: [], on: [] }; CAL.phase = 'off'; CAL.start = Date.now(); calTick(); render();
+  },
+  calOnStart: () => { CAL.phase = 'on'; CAL.start = Date.now(); CAL.buf.on = []; calTick(); render(); },
+  calCancel: () => { clearTimeout(CAL.timer); CAL.phase = null; render(); },
+  calReset: () => { CAL.phase = null; CAL.result = null; render(); },
+  clinLoginBtn: async () => {
+    const u = $('#cu').value.trim().toLowerCase(), pw = $('#cp').value, c = CLINICIANS.find(x => x.u === u);
+    if (!c || await sha256hex(c.salt + ':' + c.u + ':' + pw) !== c.hash) { $('#err').textContent = 'Kullanıcı adı veya şifre hatalı.'; return; }
+    session = { role: 'clinician', u }; ssSet('sk.session', session); go('clinList');
+  },
+  clinConnect: async () => {
+    const ok = await bleConnect(); if (!ok || !B.info) return;
+    const code = B.info.code, m = getMeta(code); if (!m.firstSeen) { m.firstSeen = Date.now(); setMeta(code, m); }
+    go('clinPatient', { code });
+  },
+  openPatient: c => go('clinPatient', { code: c }),
+  openRaw: c => go('raw', { code: c }),
+  clinGoal: d => {
+    const P = profiles(), code = params.code, p = P[code] || (P[code] = { goal: 16, goalHistory: [] });
+    const from = p.goal || 16, to = Math.min(23, Math.max(1, from + +d)); if (to === from) return;
+    p.goal = to; p.goalHistory = (p.goalHistory || []).concat({ from, to, by: 'clinician', at: Date.now() }); p.goalNote = { from, to, at: Date.now() };
+    saveProfiles(P); render(); toast(`Yeni hedef: ${to} saat. Aileye bildirildi.`);
+  },
+  csvDay: async c => {
+    const recs = await getRecs(c, Date.now() - 864e5, Date.now() + 60e3);
+    const t0 = recs.length ? recs[0].t : 0;
+    download(`skolidata_${c}_24h.csv`, 'time_s,skin_C,humidity_pct,chip_C,wall_time\n' + recs.map(r => `${((r.t - t0) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip},${new Date(r.t).toISOString()}`).join('\n'));
+  },
+  csvCal: c => {
+    const raw = lsGet('sk.calraw.' + c, null); if (!raw) { toast('Kayıtlı kalibrasyon yok.'); return; }
+    const t0 = (raw.off[0] || raw.on[0] || [0])[0], line = ph => r => `${((r[0] - t0) / 1000).toFixed(0)},${r[1] ?? ''},${r[2] ?? ''},${ph}`;
+    download(`skolidata_${c}_calibration.csv`, 'time_s,skin_C,humidity_pct,phase\n' + raw.off.map(line('off')).concat(raw.on.map(line('on'))).join('\n'));
+  },
+};
+function download(name, text) {
+  try { navigator.clipboard && navigator.clipboard.writeText(text); } catch (e) {}
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' })); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  toast('CSV indirildi ve panoya kopyalandı.');
 }
 
-function render() {
-  const now = new Date();
-  $('dateTxt').textContent = now.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' });
-  const list = sortedRecs(), flags = wornFlags(list);
-  const mid = new Date(); mid.setHours(0, 0, 0, 0);
-  const ms = wornMsSince(list, flags, mid.getTime());
-  const h = Math.floor(ms / 3.6e6), m = Math.floor((ms % 3.6e6) / 6e4);
-  $('hh').textContent = h; $('mm').textContent = m;
-  $('goalTxt').textContent = `Hedef ${goalH} sa`; $('goalEdit').textContent = `${goalH} saat`;
-  const frac = Math.min(1, ms / (goalH * 3.6e6));
-  $('ringArc').setAttribute('stroke-dasharray', `${(628.3 * frac).toFixed(1)} 628.3`);
-  $('ringBox').setAttribute('aria-label', `Bugün ${h} saat ${m} dakika takıldı, hedef ${goalH} saat`);
-  $('weekTxt').textContent = mode === 'demo' ? 'Demo' : 'Sadece bugün';
-
-  const last = list[list.length - 1], connected = mode === 'demo' || (device && device.gatt.connected);
-  const dot = $('dot');
-  if (!last) {
-    dot.className = 'dot wait';
-    $('statusTxt').textContent = !connected ? 'Telefonunu korsene yaklaştır.'
-      : recs.size > 0 ? 'Buton bağlı, sensör okunamıyor (ERR).'
-      : rxLines > 0 ? `Bağlandı · ${rxLines} satır alındı…` : 'Butondan veri bekleniyor…';
-  }
-  else if (flags[flags.length - 1]) { dot.className = 'dot'; $('statusTxt').textContent = 'Korsen takılı. Süper gidiyorsun!'; }
-  else { dot.className = 'dot off'; $('statusTxt').textContent = 'Korse şu an dinleniyor.'; }
-  $('updTxt').textContent = last ? 'Son güncelleme: ' + ago(last.t) : '';
-
-  if (!$('details').classList.contains('hidden')) {
-    const r = [...recs.values()].sort((a, b) => a.t - b.t).pop();
-    $('dSkin').textContent = r && r.skin !== null ? r.skin.toFixed(2) + ' °C' : '–';
-    $('dRh').textContent = r && r.rh !== null ? Math.round(r.rh) + ' %' : '–';
-    $('dChip').textContent = r ? r.chip.toFixed(1) + ' °C' : '–';
-    $('dV').textContent = r ? (r.mv / 1000).toFixed(2) + ' V' : '–';
-    $('thrTxt').textContent = `${ON_C} °C üstü takılı, ${OFF_C} °C altı değil`;
-    $('devInfo').textContent = `${info ? info.code : ''} · ${recs.size} kayıt · ${mode === 'demo' ? 'demo verisi' : 'canlı'}`;
-    drawChart(list);
-  }
-  if ($('rawLog')) $('rawLog').textContent = `${APP_VERSION} · alınan satır: ${rxLines} · ERR: ${errLines} · kayıt: ${recs.size}\n` + rawLog.join('\n');
-}
-function ago(t) {
-  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-  if (s < 60) return 'az önce';
-  if (s < 3600) return Math.round(s / 60) + ' dk önce';
-  return Math.round(s / 3600) + ' sa önce';
-}
-function drawChart(list) {
-  const c = $('chart'), g = c.getContext('2d'), W = c.width, H = c.height, from = Date.now() - 6 * 3.6e6;
-  g.clearRect(0, 0, W, H);
-  const pts = list.filter(r => r.t >= from);
-  const lo = 18, hi = 38, x = t => (t - from) / (6 * 3.6e6) * W, y = v => H - (v - lo) / (hi - lo) * H;
-  g.strokeStyle = '#DCE4F2'; g.lineWidth = 2;
-  [20, 25, 30, 35].forEach(v => { g.beginPath(); g.moveTo(0, y(v)); g.lineTo(W, y(v)); g.stroke(); });
-  g.fillStyle = '#5B6987'; g.font = '600 22px system-ui';
-  [20, 25, 30, 35].forEach(v => g.fillText(v + '°', 6, y(v) - 6));
-  g.setLineDash([10, 8]); g.strokeStyle = '#0B1F44'; g.beginPath(); g.moveTo(0, y(ON_C)); g.lineTo(W, y(ON_C)); g.stroke(); g.setLineDash([]);
-  if (pts.length > 1) { g.strokeStyle = '#1E5EFF'; g.lineWidth = 5; g.beginPath(); pts.forEach((r, i) => i ? g.lineTo(x(r.t), y(r.skin)) : g.moveTo(x(r.t), y(r.skin))); g.stroke(); }
-}
+// ================= start =================
+if (session && session.role === 'family' && profiles()[session.code]) screen = 'famHome';
+else if (session && session.role === 'clinician') screen = 'clinList';
+render();
+setInterval(() => { if (screen === 'famHome' || screen === 'clinPatient') { const c = screen === 'famHome' ? session && session.code : params.code; if (c && B.connected) computeDays(c, 2).then(() => { refresh(); }); } }, 60000);
 </script>
 </body>
 </html>
