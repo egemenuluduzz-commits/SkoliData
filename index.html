@@ -167,6 +167,7 @@ async function deleteCode(code) {
 
 // ================= Bluetooth (protocol 2) =================
 const B = { device: null, rx: null, connected: false, info: null, chunk: null, syncing: false, live: null, log: [], writeQ: Promise.resolve(), rxBuf: new Uint8Array(0), binLeft: 0 };
+const syncText = () => 'Buton okunuyor…' + (B.syncing && B.progress > 0.02 && B.progress < 1 ? ' %' + Math.round(B.progress * 100) : '');
 function blog(t) { B.log.push(new Date().toLocaleTimeString('tr-TR') + '  ' + t); if (B.log.length > 40) B.log.shift(); }
 function send(cmd) {
   blog('→ ' + cmd);
@@ -183,17 +184,23 @@ async function bleConnect(opts = {}) {
     const filters = opts.expect ? [{ name: opts.expect }] : [{ namePrefix: 'SK-' }, { services: [NUS] }];
     const dev = await navigator.bluetooth.requestDevice({ filters, optionalServices: [NUS] });
     B.device = dev; B.live = null;
-    dev.addEventListener('gattserverdisconnected', () => {
+    // one listener per device and per characteristic: a phone may hand back the SAME objects on a reconnect,
+    // and a second listener would feed every packet in twice (that scrambles the binary readings)
+    if (!dev.__skDisc) { dev.__skDisc = true; dev.addEventListener('gattserverdisconnected', () => {
       if (dev !== B.device) return;            // an older button we already left
       B.connected = false; B.syncing = false; blog('bağlantı koptu');
       if (CAL.phase === 'off' || CAL.phase === 'on') calFail('Bağlantı koptu. Telefonu butona yakın tut ve tekrar dene.');
       refresh();
-    });
+    }); }
     const server = await B.device.gatt.connect();
     const svc = await server.getPrimaryService(NUS);
     const tx = await svc.getCharacteristic(NUS_TX);
     B.rx = await svc.getCharacteristic(NUS_RX);
-    tx.addEventListener('characteristicvaluechanged', ev => { const v = ev.target.value; onBytes(new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength))); });
+    if (B.tx && B.onNotify) { try { B.tx.removeEventListener('characteristicvaluechanged', B.onNotify); } catch (e) {} }
+    if (tx !== B.tx || !B.onNotify) {
+      B.onNotify = ev => { const v = ev.target.value; onBytes(new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength))); };
+    }
+    B.tx = tx; tx.addEventListener('characteristicvaluechanged', B.onNotify);
     await tx.startNotifications();
     B.connected = true; B.rxBuf = new Uint8Array(0); B.binLeft = 0;
     blog('bağlandı: ' + (B.device.name || ''));
@@ -229,9 +236,17 @@ function decodeRec(dv, o) {
   const c = B.chunk; const idx = c.from + c.got++;
   const t = dv.getUint32(o, true), skin = dv.getInt16(o + 4, true), rh2 = dv.getUint8(o + 6), chip2 = dv.getUint8(o + 7);
   if (t === 0xFFFFFFFF) return;
-  if (t === 0xFFFFFFFE || t === 0xFFFFFFFD) { c.mv = skin & 0xFFFF; return; }   // boot / battery records
-  if (idx < B.info.boot) { c.untimed++; return; }                              // from an earlier power-on we never synced
-  c.recs.push({ code: B.info.code, idx, t: wallTime(t), skin: skin === -32768 ? null : skin / 100, rh: rh2 === 255 ? null : rh2 / 2, chip: chip2 / 2 - 20 });
+  if (t === 0xFFFFFFFE || t === 0xFFFFFFFD) {                                   // boot / battery records
+    c.mv = skin & 0xFFFF;
+    if (t === 0xFFFFFFFE && idx < B.info.boot) B.seg = null;                    // a restart we never saw: times unknown until the next one
+    return;
+  }
+  let wall;
+  if (idx >= B.info.boot) { wall = wallTime(t); c.lastT = t; }                 // this power-on
+  else if (B.seg && t >= B.seg.lastT && B.seg.wall + t * 1000 <= B.info.at) {  // an earlier power-on we know from the last sync
+    wall = B.seg.wall + t * 1000; B.seg.lastT = t;
+  } else { c.untimed++; return; }                                              // earlier power-on with unknown start: can't be timed
+  c.recs.push({ code: B.info.code, idx, t: wall, skin: skin === -32768 ? null : skin / 100, rh: rh2 === 255 ? null : rh2 / 2, chip: chip2 / 2 - 20 });
 }
 function handleLine(line) {
   blog('← ' + (line.length > 90 ? line.slice(0, 90) + '…' : line));
@@ -242,14 +257,14 @@ function handleLine(line) {
     B.info = { code, fw, up: g('up'), every: g('every'), boot: g('boot'), first: g('first'), next: g('next'), mv: g('mv'), flash: g('flash'), at: Date.now() };
     return;
   }
-  if (line.startsWith('D ')) { const p = line.split(' '); B.chunk = { from: +p[1], count: +p[2], got: 0, recs: [], untimed: 0, done: false }; B.binLeft = +p[2] * 8; return; }
+  if (line.startsWith('D ')) { const p = line.split(' '); B.chunk = { from: +p[1], count: +p[2], got: 0, recs: [], untimed: 0, done: false, lastT: null }; B.binLeft = +p[2] * 8; return; }
   if (line === 'E') { if (B.chunk) finishChunk(); return; }
   if (line.startsWith('L,') && B.info && !B.info.old) {
     const p = line.split(',');
     const r = { code: B.info.code, idx: +p[1], t: wallTime(+p[2]), skin: p[3] === 'ERR' ? null : +p[3], rh: p[4] === 'ERR' ? null : +p[4], chip: +p[5] };
     B.live = r;
     putRecs([r]);
-    const m = getMeta(r.code); if (m.next === r.idx) { m.next = r.idx + 1; setMeta(r.code, m); }
+    const m = getMeta(r.code); if (m.next === r.idx) { m.next = r.idx + 1; m.boot = { idx: B.info.boot, wall: B.info.at - B.info.up * 1000, lastT: +p[2] }; setMeta(r.code, m); }
     if (CAL.phase === 'off' || CAL.phase === 'on') CAL.buf[CAL.phase].push(r);
     refresh();
   }
@@ -265,14 +280,26 @@ async function syncAll(opts = {}) {
   if (refuse) { blog('reddedildi: ' + B.info.code); const info = B.info; bleDisconnect(); B.info = null; B.live = null; refresh(); alert(refuse); B.refused = info.code; return false; }
   if (opts.infoOnly) { B.syncing = false; refresh(); return true; }
   const code = B.info.code, meta = getMeta(code);
+  // the button has no clock: its readings count seconds since it was switched on ("boot"). At every sync we
+  // remember when that was, so readings from before a later restart (battery bump, battery change) still get their time.
+  const bootWall = B.info.at - B.info.up * 1000;
+  const restarted = meta.boot && meta.boot.idx !== B.info.boot;
+  B.seg = restarted && meta.boot.idx < B.info.boot ? { wall: meta.boot.wall, lastT: meta.boot.lastT || 0 } : null;
   let from = Math.max(meta.next || 0, B.info.first);
+  if (restarted && B.info.boot < from) from = Math.max(B.info.boot, B.info.first);   // unsaved readings were lost in the restart: fetch the new ones
+  if (restarted) blog('buton yeniden başlamış (boot ' + meta.boot.idx + ' → ' + B.info.boot + ')');
+  const startFrom = from, toFetch = Math.max(1, (B.info.next || 0) - from); B.progress = 0;
   for (let guard = 0; guard < 200; guard++) {
     B.chunk = null;
     await send('d' + from);
     const ok = await waitFor(() => B.chunk && B.chunk.done, 30000);
     if (!ok) { blog('aktarım yarım kaldı'); break; }
     if (B.chunk.mv) meta.mv = B.chunk.mv;
-    from = B.chunk.from + B.chunk.count; meta.next = from; setMeta(code, meta);
+    if (B.chunk.untimed) blog(B.chunk.untimed + ' okuma zamanlanamadı (bilinmeyen yeniden başlatma)');
+    from = B.chunk.from + B.chunk.count; meta.next = from; B.progress = Math.min(1, (from - startFrom) / toFetch);
+    if (from > B.info.boot) meta.boot = { idx: B.info.boot, wall: bootWall, lastT: B.chunk.lastT != null ? B.chunk.lastT : (meta.boot && meta.boot.idx === B.info.boot ? meta.boot.lastT : 0) };
+    else if (B.seg && meta.boot) meta.boot.lastT = B.seg.lastT;                  // still inside the earlier power-on
+    setMeta(code, meta);
     refresh();
     if (B.chunk.count < 4000) break;
   }
@@ -379,7 +406,7 @@ SCREENS.famConnect = () => `<main>${backBtn('login')}
   <p class="sub">Korsendeki butonu telefona yaklaştır. Bluetooth açık olsun.</p>
   <div class="note"><b>İlk bağladığın buton senin butonun olur</b>Hesabın bundan sonra yalnızca bu butonla çalışır. Giriş yaparken butonun kodunu kullanırsın; e-posta ya da telefon numarası gerekmez.</div>
   <div style="flex:1"></div>
-  ${B.syncing ? '<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>' : ''}
+  ${B.syncing ? `<div class="pill"><span class="dot wait"></span>${syncText()}</div>` : ''}
   <button class="btn primary" data-act="famConnectBtn" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>
   ${Object.keys(profiles()).length ? '<button class="btn text" data-act="go" data-arg="famLogin" style="align-self:center">Zaten hesabım var</button>' : ''}
 </main>`;
@@ -513,7 +540,7 @@ SCREENS.famHome = () => {
   const code = session.code, p = profiles()[code] || {}, goalMs = (p.goal || 16) * 3.6e6;
   const days = daysList(code, 7), today = days[6], meta = getMeta(code), sm = summary(code), model = getModel(code);
   const st = B.connected ? nowState(code) : null;
-  const status = B.syncing ? ['wait', 'Buton okunuyor…'] : !B.connected ? ['wait', 'Güncellemek için butona bağlan.'] : st === 'on' ? ['', 'Korsen takılı. Süper gidiyorsun!'] : st === 'off' ? ['off', 'Korse şu an dinleniyor.'] : st === 'unsure' ? ['wait', 'Hava çok sıcak, şu an emin değiliz.'] : ['wait', 'Butondan veri bekleniyor…'];
+  const status = B.syncing ? ['wait', syncText()] : !B.connected ? ['wait', 'Güncellemek için butona bağlan.'] : st === 'on' ? ['', 'Korsen takılı. Süper gidiyorsun!'] : st === 'off' ? ['off', 'Korse şu an dinleniyor.'] : st === 'unsure' ? ['wait', 'Hava çok sıcak, şu an emin değiliz.'] : ['wait', 'Butondan veri bekleniyor…'];
   // this week, Monday first
   const t0 = startOfDay(Date.now()), dow = (new Date().getDay() + 6) % 7;
   const wk = [0, 1, 2, 3, 4, 5, 6].map(i => { const t = addDays(t0, i - dow), k = dateKey(t), d = (DAYCACHE[code] || {})[k]; return { t, k, d, label: DAYS_TR[new Date(t).getDay()], isToday: i === dow, future: i > dow }; });
@@ -622,7 +649,7 @@ SCREENS.famNewButton = () => `<main>
   <h1 class="center">Yeni butonunu bağla</h1>
   <p class="sub center">Hesabın şu an bir butona bağlı değil. Yeni butonunu telefona yaklaştır ve bağlan. Bağladığın ilk buton hesabının butonu olur.</p>
   <div style="flex:1"></div>
-  ${B.syncing ? '<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>' : ''}
+  ${B.syncing ? `<div class="pill"><span class="dot wait"></span>${syncText()}</div>` : ''}
   <button class="btn primary" data-act="famNewButtonBtn" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>
   <button class="btn secondary" data-act="logout">Çıkış yap</button>
 </main>`;
@@ -655,7 +682,7 @@ SCREENS.clinList = () => {
   return `<main>
   <header class="row"><div><div class="sub">${esc((CLINICIANS.find(x => x.u === session.u) || {}).name || '')} <span class="chip">Doğrulanmış</span></div><h1>Hastalarım</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
   <section class="card list">${rows || '<p class="small">Bu telefonda henüz kayıtlı buton yok. Klinikte butonu bağlayarak başla.</p>'}</section>
-  ${B.syncing ? '<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>' : ''}
+  ${B.syncing ? `<div class="pill"><span class="dot wait"></span>${syncText()}</div>` : ''}
   <button class="btn secondary" data-act="clinConnect">Buton bağla</button>
   <p class="small">Bu sürümde yalnızca bu telefona senkronize edilen butonlar görünür. Sunucu bağlantısı sonraki adım.</p>
 </main>`;
@@ -1008,7 +1035,7 @@ if (SRV.on) {
     <p class="sub">Korsendeki butonu telefona yaklaştır. Bluetooth açık olsun.</p>
     <div class="note"><b>İlk bağladığın buton senin butonun olur</b>Hesabın bundan sonra yalnızca bu butonla çalışır. Giriş yaparken butonun kodunu kullanırsın; e-posta ya da telefon numarası gerekmez.</div>
     <div style="flex:1"></div>
-    ${B.syncing ? '<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>' : ''}
+    ${B.syncing ? `<div class="pill"><span class="dot wait"></span>${syncText()}</div>` : ''}
     <button class="btn primary" data-act="famConnectBtn" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>
   </main>`;
   SCREENS.famPass = p => `<main>${backBtn('famConnect')}
