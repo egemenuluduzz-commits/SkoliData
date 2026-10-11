@@ -853,9 +853,11 @@ if (SRV.on) SRV.sb = window.supabase.createClient(SKCFG.supabaseUrl, SKCFG.supab
 window.SRV_ON = SRV.on;
 // families have no real e-mail: a random login address, found again from the button code at login
 const newFamilyEmail = () => 'f-' + randHex(8) + '@aile.skolidata.app';
+// temporary password for owner resets: 10 characters, no look-alikes (0/O, 1/I/L), easy to read out on the phone
+function tempPassword() { const A = '23456789ABCDEFGHJKMNPQRSTUVWXYZ', r = crypto.getRandomValues(new Uint8Array(10)); const t = [...r].map(x => A[x % A.length]).join(''); return t.slice(0, 5) + '-' + t.slice(5); }
 const TAKEN_MSG = 'Bu buton başka bir hesaba bağlı. Kendi hesabınsa "Giriş yap"ı kullan. Buton sana yeni verildiyse, önceki kullanıcının ya da klinisyeninin butonu serbest bırakması gerekir (SkoliData da yardımcı olabilir).';
 const CITIES = ['Adana','Adıyaman','Afyonkarahisar','Ağrı','Aksaray','Amasya','Ankara','Antalya','Ardahan','Artvin','Aydın','Balıkesir','Bartın','Batman','Bayburt','Bilecik','Bingöl','Bitlis','Bolu','Burdur','Bursa','Çanakkale','Çankırı','Çorum','Denizli','Diyarbakır','Düzce','Edirne','Elazığ','Erzincan','Erzurum','Eskişehir','Gaziantep','Giresun','Gümüşhane','Hakkâri','Hatay','Iğdır','Isparta','İstanbul','İzmir','Kahramanmaraş','Karabük','Karaman','Kars','Kastamonu','Kayseri','Kilis','Kırıkkale','Kırklareli','Kırşehir','Kocaeli','Konya','Kütahya','Malatya','Manisa','Mardin','Mersin','Muğla','Muş','Nevşehir','Niğde','Ordu','Osmaniye','Rize','Sakarya','Samsun','Şanlıurfa','Siirt','Sinop','Sivas','Şırnak','Tekirdağ','Tokat','Trabzon','Tunceli','Uşak','Van','Yalova','Yozgat','Zonguldak'];
-const ERR_TR = { button_taken: 'Bu buton başka bir hesaba bağlı.', has_button: 'Bu hesabın zaten bir butonu var.', code_invalid: 'Buton kodu geçersiz.', not_family: 'Bu bir aile hesabı değil.',
+const ERR_TR = { password_short: 'Şifre en az 8 karakter olmalı.', password_long: 'Şifre en fazla 72 karakter olabilir.', button_taken: 'Bu buton başka bir hesaba bağlı.', has_button: 'Bu hesabın zaten bir butonu var.', code_invalid: 'Buton kodu geçersiz.', not_family: 'Bu bir aile hesabı değil.',
   already_registered: 'Bu hesap zaten kayıtlı.', clinician_not_found: 'Bu klinisyen kodu bulunamadı.', not_approved: 'Hesabınız henüz onaylanmadı.',
   not_allowed: 'Bu işlem için yetkin yok.', not_owner: 'Bu işlem yalnızca SkoliData yöneticisine açık.',
   'Invalid login credentials': 'Kod/e-posta ya da şifre hatalı.', 'User already registered': 'Bu hesap zaten var. Giriş yap.',
@@ -975,6 +977,7 @@ SRV.loadOwner = async () => {
 async function routeAfterLogin() {
   const p = SRV.profile;
   if (!p) return go('login');
+  if (p.must_change_password) return go('pwChange', { forced: true });
   if (p.role === 'family') { session = { role: 'family', code: p.button_code || null }; ssSet('sk.session', session); await SRV.pullFamily(true); return go('famHome'); }
   session = { role: p.role === 'owner' ? 'owner' : 'clinician', u: SRV.user.email }; ssSet('sk.session', session);
   if (p.role === 'owner') { await SRV.loadOwner(); return go('owner'); }
@@ -1039,7 +1042,7 @@ if (SRV.on) {
       <label class="f" style="margin-top:10px">Klinisyen kodu<input class="in" id="ccode" placeholder="DR-XXXXXX" autocapitalize="characters"></label>
       <label class="f" style="margin-top:8px">Klinisyen seni hangi isimle görsün?<input class="in" id="dname" placeholder="Örn. Elif Y." value="${esc((SRV.profile && SRV.profile.display_name) || '')}"></label>
       <button class="btn secondary" data-act="famLink" style="margin-top:10px">Klinisyenle paylaş</button></section>`;
-    return html.replace('<section class="card list">\n    <button class="li" data-act="showConsent">', extra + '\n  <section class="card list">\n    <button class="li" data-act="showConsent">');
+    return html.replace('<section class="card list">\n    <button class="li" data-act="showConsent">', extra + '\n  <section class="card list">\n    <button class="li" data-act="pwOpen" data-arg="famSettings"><span class="k">Şifreyi değiştir</span><span class="v">›</span></button>\n    <button class="li" data-act="showConsent">');
   };
   ACTIONS.famStart = () => { if (session && session.role === 'family' && SRV.profile) return go('famHome'); go('famLogin'); };
   // sign-up: the connected button must be free; nothing is stored from a button that belongs to someone else
@@ -1145,7 +1148,31 @@ if (SRV.on) {
     await SRV.signOut(); session = null; ssSet('sk.session', null); go('login'); toast('Hesabın silindi.');
   };
   ACTIONS.logout = async () => { await SRV.signOut(); session = null; ssSet('sk.session', null); go('login'); };
-  ACTIONS.forgot = () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş; kimliğini doğruladıktan sonra yeni şifre veririz.');
+  ACTIONS.forgot = () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş; kimliğini doğruladıktan sonra sana geçici bir şifre veririz. İlk girişte kendi yeni şifreni belirlersin.');
+
+  // ---------- password: change own (any role); required after an owner reset ----------
+  SCREENS.pwChange = p => `<main>${p.forced ? '' : backBtn(p.back || 'login')}
+    <h1>${p.forced ? 'Yeni şifre belirle' : 'Şifreyi değiştir'}</h1>
+    ${p.forced ? '<p class="sub">Şifren SkoliData tarafından sıfırlandı. Devam etmek için kendine yeni bir şifre belirle. Bu şifreyi kimse bilmeyecek.</p>' : `<label class="f">Şu anki şifre<input class="in" id="pc" type="password" autocomplete="current-password"></label>`}
+    <label class="f">Yeni şifre (en az 8 karakter)<input class="in" id="pn1" type="password" autocomplete="new-password"></label>
+    <label class="f">Yeni şifre tekrar<input class="in" id="pn2" type="password" autocomplete="new-password"></label>
+    <p class="err" id="err"></p><div style="flex:1"></div>
+    <button class="btn primary" data-act="pwSave">Kaydet</button>
+    ${p.forced ? '<button class="btn secondary" data-act="logout">Çıkış yap</button>' : ''}
+  </main>`;
+  ACTIONS.pwOpen = back => go('pwChange', { back });
+  ACTIONS.pwSave = async () => {
+    const forced = !!params.forced, back = params.back, a = $('#pn1').value, b = $('#pn2').value;
+    if (a.length < 8) { $('#err').textContent = 'Şifre en az 8 karakter olmalı.'; return; }
+    if (a !== b) { $('#err').textContent = 'Şifreler aynı değil.'; return; }
+    busy(true);
+    try {
+      if (!forced) { const { error } = await SRV.sb.auth.signInWithPassword({ email: SRV.user.email, password: $('#pc').value }); if (error) { $('#err').textContent = 'Şu anki şifre hatalı.'; return; } }
+      await SRV.rpc('change_my_password', { p_password: a });
+      await SRV.loadMe(); toast('Şifren değişti.');
+      if (forced) await routeAfterLogin(); else go(back || 'login');
+    } catch (e) { $('#err').textContent = trErr(e); } finally { busy(false); }
+  };
 
   // ---------- clinician ----------
   SCREENS.clinLogin = () => `<main>${backBtn('login')}
@@ -1181,7 +1208,7 @@ if (SRV.on) {
     const codeCard = code ? `<div class="note"><b>Klinisyen kodunuz: ${esc(code)}</b>Ailelere bu kodu verin. Aile uygulamada kodu girip onayladığında burada görünür.</div>` : '';
     return baseClinList().replace('<section class="card list">', codeCard + '<section class="card list">')
       .replace('Bu telefonda henüz kayıtlı buton yok. Klinikte butonu bağlayarak başla.', 'Henüz sizinle paylaşan aile yok. Kodunuzu ailelere verin.')
-      .replace('<p class="small">Bu sürümde yalnızca bu telefona senkronize edilen butonlar görünür. Sunucu bağlantısı sonraki adım.</p>', '<button class="btn text" data-act="clinRefresh" style="align-self:center">Yenile</button>');
+      .replace('<p class="small">Bu sürümde yalnızca bu telefona senkronize edilen butonlar görünür. Sunucu bağlantısı sonraki adım.</p>', '<button class="btn text" data-act="clinRefresh" style="align-self:center">Yenile</button><button class="btn text" data-act="pwOpen" data-arg="clinList" style="align-self:center">Şifreyi değiştir</button>');
   };
   SCREENS.clinList.after = () => {};
   clinCodes = () => SRV.patients.map(pt => pt._key);
@@ -1270,12 +1297,13 @@ if (SRV.on) {
       <p class="small">Bir aileye dokun: saatlerini gör, butonunu değiştir ya da ayır.</p>
     </section>
     <section class="card list"><div class="li"><span class="k">Klinisyenler</span><span class="v">${approved.length}</span></div>
-      ${approved.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${esc(c.code || '')} · ${c.patients} aile</span></span></div>`).join('') || '<p class="small">Henüz yok.</p>'}
+      ${approved.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${esc(c.code || '')} · ${c.patients} aile · ${esc(c.email)}</span></span><button class="btn text" data-act="ownerResetPw" data-arg="${c.id}">Şifre sıfırla</button></div>`).join('') || '<p class="small">Henüz yok.</p>'}
     </section>
     <section class="card list"><div class="li"><span class="k">Buton sağlığı</span><span class="v">${o.health.length}</span></div>${o.health.map(healthRow).join('') || '<p class="small">Henüz buton yok.</p>'}</section>
     <section class="card list"><div class="li"><span class="k">Şehirler</span><span class="v">aile · klinisyen</span></div>${o.cities.map(c => `<div class="li"><span class="k">${esc(c.city)}</span><span class="v">${c.families} · ${c.clinicians}</span></div>`).join('') || '<p class="small">Veri yok.</p>'}<p class="small">1–4 arası sayılar gizlilik için "1-4" gösterilir.</p></section>
     <section class="card list"><div class="li"><span class="k">Erişim günlüğü</span><span></span></div>${o.audit.slice(0, 15).map(a => `<div class="li"><span class="small">${new Date(a.at).toLocaleString('tr-TR')}</span><span class="v">${esc(a.action)}${a.detail && a.detail.code ? ' · ' + esc(a.detail.code) : ''}${a.detail && a.detail.by ? ' · ' + esc(a.detail.by) : ''}</span></div>`).join('') || '<p class="small">Boş.</p>'}</section>
     <button class="btn text" data-act="ownerRefresh" style="align-self:center">Yenile</button>
+    <button class="btn text" data-act="pwOpen" data-arg="owner" style="align-self:center">Kendi şifremi değiştir</button>
   </main>`;
   };
   // one family: hours (logged) + button assignment
@@ -1299,10 +1327,36 @@ if (SRV.on) {
       <div class="grid2" style="margin-top:10px"><button class="btn secondary" data-act="ownerReadButton">Butonu oku</button><button class="btn primary" data-act="ownerAssign">Bu butonu ver</button></div>
       ${f.button_code ? `<button class="btn text" data-act="ownerUnassign" style="margin-top:6px">Butonu bu aileden ayır</button>` : ''}
     </section>
+    <section class="card"><b>Şifre</b><p class="small" style="margin:4px 0 8px">Aile şifresini unuttuysa önce telefonda kimliğini doğrula (buton kodu, şehir, kayıt ayı). Sonra geçici şifre oluştur; aile ilk girişte kendi şifresini belirler.</p>
+      <button class="btn secondary" data-act="ownerResetPw" data-arg="${esc(f.id)}">Şifreyi sıfırla</button></section>
     <section class="card"><b>Saatler</b><p class="small" style="margin:4px 0 8px">Her görüntüleme erişim günlüğüne yazılır.</p>
       <button class="btn secondary" data-act="ownerHours">Saatleri göster</button>${hours}</section>
   </main>`;
   };
+  SCREENS.ownerPw = p => `<main>
+    <h1>Geçici şifre</h1>
+    <p class="sub">${esc(p.who)}</p>
+    <section class="card center" style="display:flex;flex-direction:column;align-items:center;gap:6px">
+      <b id="tmpPw" style="font-size:30px;letter-spacing:.08em;user-select:all">${esc(p.pw)}</b>
+      <span class="small">${p.code ? 'Giriş: buton kodu ' + esc(p.code) + ' + bu şifre' : p.email ? 'Giriş: ' + esc(p.email) + ' + bu şifre' : ''}</span></section>
+    <div class="note"><b>Bir kez gösterilir</b>Bu şifreyi kişiye telefonda ya da yüz yüze söyle. İlk girişte kendi yeni şifresini belirlemesi istenecek. Şifre hiçbir yere kaydedilmez.</div>
+    <div style="flex:1"></div>
+    <button class="btn secondary" data-act="ownerPwCopy">Kopyala</button>
+    <button class="btn primary" data-act="ownerPwDone">Tamam</button>
+  </main>`;
+  ACTIONS.ownerResetPw = async id => {
+    const f = SRV.owner.families.find(x => x.id === id), c = SRV.owner.clinicians.find(x => x.id === id);
+    const who = f ? `${famName(f)}${f.button_code ? ' · ' + f.button_code : ''}` : c ? `${c.name} · ${c.email}` : '';
+    if (!confirm(`Şifre sıfırlansın mı?\n\n${who}\n\nKimliğini doğruladın mı? Eski şifre hemen çalışmaz olur; sana yeni bir geçici şifre göstereceğim.`)) return;
+    const pw = tempPassword(), back = { screen, params: Object.assign({}, params) };
+    try {
+      await SRV.rpc('owner_reset_password', { p_user: id, p_password: pw });
+      SRV.loadOwner().catch(() => {});
+      go('ownerPw', { pw, who, code: f && (f.button_code || f.last_button_code), email: c && c.email, back });
+    } catch (e) { toast(trErr(e)); }
+  };
+  ACTIONS.ownerPwCopy = () => { try { navigator.clipboard.writeText(params.pw); toast('Kopyalandı.'); } catch (e) { toast('Kopyalanamadı; şifreyi elle yaz.'); } };
+  ACTIONS.ownerPwDone = () => { const b = params.back || { screen: 'owner', params: {} }; go(b.screen, b.params); };
   ACTIONS.ownerRefresh = async () => { try { await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerApprove = async id => { try { const code = await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: true }); toast('Onaylandı: ' + code); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerReject = async id => { if (!confirm('Bu klinisyen onaylanmayacak. Emin misin?')) return; try { await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: false }); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
