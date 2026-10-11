@@ -88,7 +88,7 @@ svg.chart{width:100%;height:auto;display:block}
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.1 · algo v1';
+const APP_VERSION = 'app v1.2 · algo v1';
 const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e', NUS_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e', NUS_TX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 // Clinician accounts: only a salted SHA-256 of the password is stored here (never the password itself).
 // NOTE: this is a front door for testing, not real security; real accounts need the server (master plan §6-7).
@@ -173,10 +173,15 @@ function send(cmd) {
   B.writeQ = B.writeQ.then(() => B.rx ? B.rx.writeValue(new TextEncoder().encode(cmd + '\n')) : null).catch(e => blog('write error ' + e.message));
   return B.writeQ;
 }
-async function bleConnect() {
+function bleDisconnect() { try { if (B.device && B.device.gatt && B.device.gatt.connected) B.device.gatt.disconnect(); } catch (e) {} B.connected = false; B.syncing = false; }
+// opts.expect: only this button code (the picker shows only it, and the code is checked again after connecting)
+// opts.allow: async code -> null (ok) or a message (refuse before any reading is stored)
+// opts.infoOnly: read the button's code, don't download readings
+async function bleConnect(opts = {}) {
   if (!navigator.bluetooth) { alert("Bu tarayıcı Bluetooth'a bağlanamıyor. iPhone'da ücretsiz \"Bluefy\" uygulamasıyla, Android'de Chrome ile aç."); return false; }
   try {
-    const dev = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'SK-' }, { services: [NUS] }], optionalServices: [NUS] });
+    const filters = opts.expect ? [{ name: opts.expect }] : [{ namePrefix: 'SK-' }, { services: [NUS] }];
+    const dev = await navigator.bluetooth.requestDevice({ filters, optionalServices: [NUS] });
     B.device = dev; B.live = null;
     dev.addEventListener('gattserverdisconnected', () => {
       if (dev !== B.device) return;            // an older button we already left
@@ -193,7 +198,7 @@ async function bleConnect() {
     B.connected = true; B.rxBuf = new Uint8Array(0); B.binLeft = 0;
     blog('bağlandı: ' + (B.device.name || ''));
     refresh();
-    return await syncAll();
+    return await syncAll(opts);
   } catch (e) {
     if (e && e.name !== 'NotFoundError') alert('Bağlanamadı: ' + e.message);
     B.connected = !!(B.device && B.device.gatt && B.device.gatt.connected);
@@ -250,11 +255,15 @@ function handleLine(line) {
   }
 }
 async function finishChunk() { const c = B.chunk; await putRecs(c.recs); c.done = true; }
-async function syncAll() {
+async function syncAll(opts = {}) {
   B.info = null; B.syncing = true; refresh();
   for (let k = 0; k < 6 && !B.info; k++) { await send('i'); await waitFor(() => B.info, 1500); }
   if (!B.info) { B.syncing = false; toast('Buton yanıt vermedi.'); refresh(); return false; }
   if (B.info.old) { B.syncing = false; alert('Bu butonda eski yazılım var (' + B.info.fw + '). SkoliData_4_Button yazılımını yükle.'); refresh(); return false; }
+  let refuse = opts.expect && B.info.code !== opts.expect ? `Bu buton (${B.info.code}) senin hesabına bağlı değil. Hesabın yalnızca kendi butonunla (${opts.expect}) çalışır.` : null;
+  if (!refuse && opts.allow) { try { refuse = await opts.allow(B.info.code); } catch (e) { refuse = (typeof trErr === 'function' ? trErr(e) : String(e)); } }
+  if (refuse) { blog('reddedildi: ' + B.info.code); const info = B.info; bleDisconnect(); B.info = null; B.live = null; refresh(); alert(refuse); B.refused = info.code; return false; }
+  if (opts.infoOnly) { B.syncing = false; refresh(); return true; }
   const code = B.info.code, meta = getMeta(code);
   let from = Math.max(meta.next || 0, B.info.first);
   for (let guard = 0; guard < 200; guard++) {
@@ -304,10 +313,14 @@ async function computeDays(code, nDays = 14, force) {
     if (!isToday && meta.lastSync > b) cache[key] = day;     // finished day, synced after it ended
   }
   lsSet('sk.days.' + code, cache);
-  DAYCACHE[code] = Object.assign(DAYCACHE[code] || {}, out);
+  const cur = DAYCACHE[code] || {};
+  for (const k in out) if (!(out[k].dataMs > 0) && cur[k] && cur[k].fromServer) out[k] = cur[k];
+  DAYCACHE[code] = Object.assign(cur, out);
   return DAYCACHE[code];
 }
-function daysList(code, n) { const c = DAYCACHE[code] || {}; const t0 = startOfDay(Date.now()); const arr = []; for (let d = n - 1; d >= 0; d--) { const k = dateKey(addDays(t0, -d)); arr.push(c[k] || { key: k, start: addDays(t0, -d), ms: 0, dataMs: 0, unsureMs: 0, segs: [] }); } return arr; }
+const EXTRA = {};   // code -> {key -> day}: hours from the same family's earlier buttons (added when shown)
+function mergeDay(d, x) { return Object.assign({}, d, { ms: d.ms + x.ms, unsureMs: (d.unsureMs || 0) + (x.unsureMs || 0), dataMs: Math.min(864e5, (d.dataMs || 0) + (x.dataMs || 0)), segs: (d.segs || []).concat(x.segs || []).sort((a, b) => a[0] - b[0]) }); }
+function daysList(code, n) { const c = DAYCACHE[code] || {}, ex = EXTRA[code] || {}; const t0 = startOfDay(Date.now()); const arr = []; for (let d = n - 1; d >= 0; d--) { const k = dateKey(addDays(t0, -d)); const base = c[k] || { key: k, start: addDays(t0, -d), ms: 0, dataMs: 0, unsureMs: 0, segs: [] }; arr.push(ex[k] ? mergeDay(base, ex[k]) : base); } return arr; }
 function summary(code) {
   const p = profiles()[code] || {}, goalMs = (p.goal || 16) * 3.6e6;
   const past = daysList(code, 15).slice(0, 14).filter(d => d.dataMs > 2 * 3.6e6);
@@ -336,10 +349,12 @@ function battery(code) {
 // ================= session + routing =================
 let session = ssGet('sk.session');   // {role:'family', code} | {role:'clinician', u}
 let screen = 'login', params = {};
-const LIVE = new Set(['famHome', 'calib', 'clinPatient', 'raw', 'famSettings', 'famWeek', 'clinList', 'famConnect']);
+const LIVE = new Set(['famHome', 'calib', 'clinPatient', 'raw', 'famSettings', 'famWeek', 'clinList', 'famConnect', 'famNewButton']);
 function go(s, p = {}) { screen = s; params = p; render(); window.scrollTo(0, 0); }
 function refresh() { if (LIVE.has(screen) && !(document.activeElement && document.activeElement.tagName === 'INPUT')) render(); }
-function render() { const f = SCREENS[screen] || SCREENS.login; $('#app').innerHTML = f(params); if (f.after) f.after(params); }
+const NEEDS_BUTTON = new Set(['famHome', 'famWeek', 'famSettings']);
+const familyNeedsButton = () => !!(session && session.role === 'family' && (!session.code || (profiles()[session.code] || {}).released));
+function render() { if (NEEDS_BUTTON.has(screen) && familyNeedsButton()) screen = 'famNewButton'; const f = SCREENS[screen] || SCREENS.login; $('#app').innerHTML = f(params); if (f.after) f.after(params); }
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const fn = ACTIONS[el.dataset.act]; if (fn) { e.preventDefault(); fn(el.dataset.arg, el); }
@@ -362,7 +377,7 @@ SCREENS.login = () => `<main>
 SCREENS.famConnect = () => `<main>${backBtn('login')}
   <h1>Butonunu bağla</h1>
   <p class="sub">Korsendeki butonu telefona yaklaştır. Bluetooth açık olsun.</p>
-  <div class="note"><b>Neden?</b>Hesabın butonunun kendi koduyla oluşturulur. E-posta ya da telefon numarası gerekmez.</div>
+  <div class="note"><b>İlk bağladığın buton senin butonun olur</b>Hesabın bundan sonra yalnızca bu butonla çalışır. Giriş yaparken butonun kodunu kullanırsın; e-posta ya da telefon numarası gerekmez.</div>
   <div style="flex:1"></div>
   ${B.syncing ? '<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>' : ''}
   <button class="btn primary" data-act="famConnectBtn" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>
@@ -524,7 +539,15 @@ SCREENS.famHome = () => {
   <p class="upd">Son güncelleme: ${ago(meta.lastSync && B.live ? Math.max(meta.lastSync, B.live.t) : meta.lastSync)}</p>
 </main>`;
 };
-SCREENS.famHome.after = () => { const code = session && session.code; if (code && !DAYCACHE[code]) computeDays(code).then(refresh); };
+SCREENS.famHome.after = () => { const code = session && session.code; if (code && !DAYCACHE[code]) computeDays(code).then(refresh); if (code && !window.SRV_ON) loadOldButtons(code); };
+// local mode: hours recorded with this account's earlier buttons on this phone
+const OLDLOADED = {};
+async function loadOldButtons(code) {
+  const olds = (profiles()[code] || {}).oldCodes || []; if (!olds.length || OLDLOADED[code]) return;
+  OLDLOADED[code] = true; const ex = {};
+  for (const o of olds) { await computeDays(o, 14); daysList(o, 14).forEach(d => { if (d.dataMs > 0) ex[d.key] = ex[d.key] ? mergeDay(ex[d.key], d) : d; }); }
+  EXTRA[code] = ex; refresh();
+}
 
 // week map + bars (shared by family "Haftam" and the clinician page)
 function barsSvg(days, goalMs, labelsEvery = 1) {
@@ -564,6 +587,7 @@ SCREENS.famSettings = () => {
     <div class="li"><span class="k">Günlük hedef</span><span class="v">${p.goal || 16} saat</span></div>
     <div class="stepper" style="padding:6px 0 10px"><button data-act="famGoalAdj" data-arg="-1" aria-label="Azalt">–</button><span class="small">Hedefi değiştir</span><button data-act="famGoalAdj" data-arg="1" aria-label="Artır">+</button></div>
     <div class="li"><span class="k">Butonum</span><span class="v">${esc(code)}</span></div>
+    <button class="li" data-act="famResetStart"><span class="k">Butonu değiştir</span><span class="v">›</span></button>
     <div class="li" style="flex-direction:column;align-items:stretch"><div class="row"><span class="k">Pil</span><span class="v">${esc(bat.txt)}</span></div><div class="gauge" aria-hidden="true">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= bat.seg ? 'on' : ''}"></i>`).join('')}</div></div>
     <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model ? fmtDate(model.createdAt) : 'yapılmadı'}</span></div>
   </section>
@@ -576,6 +600,32 @@ SCREENS.famSettings = () => {
   <button class="btn text" data-act="famDelete" style="align-self:center">Hesabı ve verileri sil</button>
 </main>`;
 };
+SCREENS.famReset = () => `<main>${backBtn('famSettings')}
+  <h1>Son uyarı</h1>
+  <p class="sub">Hesabın <b>${esc(session.code)}</b> butonundan ayrılacak.</p>
+  <section class="card list">
+    <div class="li"><span class="k">Bu buton artık senin hesabına veri göndermez.</span></div>
+    <div class="li"><span class="k">Buton başka bir aileye verilebilir.</span></div>
+    <div class="li"><span class="k">Şimdiye kadarki saatlerin hesabında kalır.</span></div>
+    <div class="li"><span class="k">Yeni butonunu bağlayana kadar korse saatlerin kaydedilmez.</span></div>
+    <div class="li"><span class="k">Yeni butonla 10 dakikalık kalibrasyonu tekrar yapacaksın.</span></div>
+  </section>
+  <label class="f">Onaylamak için şifreni yaz<input class="in" id="rp" type="password" autocomplete="current-password"></label>
+  <p class="err" id="err"></p>
+  <div style="flex:1"></div>
+  <button class="btn primary" data-act="famResetGo">Butonu sıfırla</button>
+  <button class="btn secondary" data-act="go" data-arg="famSettings">Vazgeç</button>
+</main>`;
+SCREENS.famNewButton = () => `<main>
+  <div style="flex:1"></div>
+  <div class="mark" aria-hidden="true"><span></span></div>
+  <h1 class="center">Yeni butonunu bağla</h1>
+  <p class="sub center">Hesabın şu an bir butona bağlı değil. Yeni butonunu telefona yaklaştır ve bağlan. Bağladığın ilk buton hesabının butonu olur.</p>
+  <div style="flex:1"></div>
+  ${B.syncing ? '<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>' : ''}
+  <button class="btn primary" data-act="famNewButtonBtn" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>
+  <button class="btn secondary" data-act="logout">Çıkış yap</button>
+</main>`;
 SCREENS.consentView = () => `<main>${backBtn(session && session.role === 'family' ? 'famSettings' : 'login')}<h1>Gizlilik ve onay</h1><section class="card" style="display:flex;flex-direction:column;gap:10px;font-size:15px">${CONSENT_TEXT}</section></main>`;
 
 // ---------- clinician ----------
@@ -590,7 +640,7 @@ SCREENS.clinLogin = () => `<main>${backBtn('login')}
   <p class="small center">Klinisyen hesapları SkoliData tarafından onaylanır.</p>
 </main>`;
 function knownCodes() {
-  const set = new Set(Object.keys(profiles()));
+  const set = new Set(Object.keys(profiles()).filter(k => !k.includes('~')));
   try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('sk.meta.')) set.add(k.slice(8)); } } catch (e) { Object.keys(mem).filter(k => k.startsWith('sk.meta.')).forEach(k => set.add(k.slice(8))); }
   return [...set].sort();
 }
@@ -598,9 +648,10 @@ function miniBars(code, goalMs) {
   const days = daysList(code, 8).slice(0, 7), max = Math.max(goalMs, ...days.map(d => d.ms), 1);
   return `<svg width="70" height="26" viewBox="0 0 70 26" aria-hidden="true">${days.map((d, i) => { const h = Math.max(1.5, 24 * d.ms / max); return `<rect x="${i * 10}" y="${26 - h}" width="7" height="${h}" rx="2" fill="${d.ms >= goalMs ? '#1E5EFF' : '#A9C8FF'}"/>`; }).join('')}</svg>`;
 }
+let clinCodes = knownCodes;
 SCREENS.clinList = () => {
-  const codes = knownCodes(), P = profiles();
-  const rows = codes.map(c => { const s = summary(c), g = (P[c] && P[c].goal) || 16; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(c)}</span><br><span class="small">${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : s.todayData ? 'bugün ' + fmtH1(s.todayMs) + ' sa' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven ? '<span class="chip">Düzensiz</span>' : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
+  const codes = clinCodes(), P = profiles();
+  const rows = codes.map(c => { const s = summary(c), g = (P[c] && P[c].goal) || 16, nm = P[c] && P[c].displayName; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(nm || c)}</span><br><span class="small">${nm ? esc(P[c].noButton ? 'buton yok' : c) + ' · ' : ''}${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : s.todayData ? 'bugün ' + fmtH1(s.todayMs) + ' sa' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven ? '<span class="chip">Düzensiz</span>' : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
   return `<main>
   <header class="row"><div><div class="sub">${esc((CLINICIANS.find(x => x.u === session.u) || {}).name || '')} <span class="chip">Doğrulanmış</span></div><h1>Hastalarım</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
   <section class="card list">${rows || '<p class="small">Bu telefonda henüz kayıtlı buton yok. Klinikte butonu bağlayarak başla.</p>'}</section>
@@ -669,15 +720,17 @@ SCREENS.raw.after = async p => {
 const ACTIONS = {
   go: s => go(s, s === 'clinPatient' || s === 'raw' ? params : {}),
   connect: async () => {
-    await bleConnect();
-    if (session && session.role === 'family' && B.info && B.info.code && B.info.code !== session.code) alert(`Bu buton (${B.info.code}) senin hesabına ait değil. Kendi butonuna bağlan.`);
+    if (session && session.role === 'family') return bleConnect({ expect: session.code });
+    if (screen === 'calib' && CAL.by === 'clinician') return bleConnect({ expect: CAL.code });
+    return bleConnect();
   },
   famStart: () => { const P = profiles(); if (session && session.role === 'family' && P[session.code]) return go('famHome'); go(Object.keys(P).length ? 'famLogin' : 'famConnect'); },
   famConnectBtn: async () => {
-    const ok = await bleConnect(); if (!ok || !B.info) return;
-    const code = B.info.code, P = profiles();
-    if (P[code]) { toast('Bu butonun hesabı var. Giriş yap.'); go('famLogin'); return; }
-    go('famPass', { code });
+    let has = false;
+    const ok = await bleConnect({ allow: async c => { const p = profiles()[c]; if (p && !p.released) { has = true; return 'Bu butonun bu telefonda zaten bir hesabı var. Giriş yap.'; } return null; } });
+    if (has) { go('famLogin'); return; }
+    if (!ok || !B.info) return;
+    go('famPass', { code: B.info.code });
   },
   famPassSave: async () => {
     const a = $('#pw1').value, b = $('#pw2').value;
@@ -694,7 +747,8 @@ const ACTIONS = {
   goalStep: d => { params.goal = Math.min(23, Math.max(1, (params.goal || 16) + +d)); $('#gv').textContent = params.goal + ' saat'; },
   famGoalSave: () => {
     const P = profiles(), goal = params.goal || 16;
-    P[params.code] = { pwSalt: params.pw.salt, pwHash: params.pw.hash, consentAt: params.consentAt, consentVersion: 'v1-taslak', goal, goalHistory: [{ to: goal, by: 'family', at: Date.now() }], createdAt: Date.now() };
+    if (P[params.code]) P[params.code + '~' + Date.now()] = P[params.code];      // an older account that had freed this button
+    P[params.code] = { acct: params.code, pwSalt: params.pw.salt, pwHash: params.pw.hash, consentAt: params.consentAt, consentVersion: 'v1-taslak', goal, goalHistory: [{ to: goal, by: 'family', at: Date.now() }], createdAt: Date.now() };
     saveProfiles(P);
     const m = getMeta(params.code); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(params.code, m);
     session = { role: 'family', code: params.code }; ssSet('sk.session', session);
@@ -704,10 +758,38 @@ const ACTIONS = {
   famLoginBtn: async () => {
     const code = $('#lc').value.trim().toUpperCase(), pw = $('#lp').value, P = profiles();
     if (!P[code]) { $('#err').textContent = 'Bu buton kodu bu telefonda kayıtlı değil.'; return; }
-    if (await sha256hex(P[code].pwSalt + ':' + code + ':' + pw) !== P[code].pwHash) { $('#err').textContent = 'Şifre hatalı.'; return; }
+    if (await sha256hex(P[code].pwSalt + ':' + (P[code].acct || code) + ':' + pw) !== P[code].pwHash) { $('#err').textContent = 'Şifre hatalı.'; return; }
     session = { role: 'family', code }; ssSet('sk.session', session); go('famHome');
   },
   forgot: () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş.'),
+  // change button: warning 1 (dialog) -> warning 2 (screen + password) -> account without a button
+  famResetStart: () => {
+    if (!confirm(`Butonunu değiştirmek istiyor musun?\n\nHesabın ${session.code} butonundan ayrılacak ve yeni bir buton bağlayana kadar saatlerin kaydedilmeyecek.`)) return;
+    go('famReset');
+  },
+  famResetGo: async () => {
+    const pw = $('#rp').value, P = profiles(), p = P[session.code];
+    if (!p || await sha256hex(p.pwSalt + ':' + (p.acct || session.code) + ':' + pw) !== p.pwHash) { $('#err').textContent = 'Şifre hatalı.'; return; }
+    p.released = true; p.releasedAt = Date.now(); saveProfiles(P);
+    bleDisconnect(); B.info = null; B.live = null;
+    go('famNewButton'); toast('Buton sıfırlandı. Yeni butonunu bağlayabilirsin.');
+  },
+  famNewButtonBtn: async () => {
+    const old = session.code;
+    const ok = await bleConnect({ allow: async c => { const q = profiles()[c]; return q && !q.released && c !== old ? 'Bu buton bu telefonda başka bir hesaba bağlı.' : null; } });
+    if (!ok || !B.info) return;
+    const c = B.info.code, P = profiles(), p = P[old];
+    if (c !== old) {
+      if (P[c]) P[c + '~' + Date.now()] = P[c];
+      p.oldCodes = (p.oldCodes || []).concat(old).filter(x => x !== c);
+      delete P[old];
+    }
+    delete p.released; delete p.releasedAt; P[c] = p; saveProfiles(P);
+    const m = getMeta(c); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(c, m);
+    session = { role: 'family', code: c }; ssSet('sk.session', session); delete OLDLOADED[c];
+    CAL.phase = null; CAL.result = null; CAL.code = c; CAL.by = 'family';
+    go('calib'); toast('Yeni butonun bağlandı: ' + c);
+  },
   famGoalAdj: d => { const P = profiles(), p = P[session.code]; const to = Math.min(23, Math.max(1, (p.goal || 16) + +d)); if (to === p.goal) return; p.goalHistory = (p.goalHistory || []).concat({ from: p.goal, to, by: 'family', at: Date.now() }); p.goal = to; saveProfiles(P); render(); },
   showConsent: () => go('consentView'),
   logout: () => { session = null; ssSet('sk.session', null); go('login'); },
@@ -718,7 +800,7 @@ const ACTIONS = {
     await deleteCode(c); delete DAYCACHE[c];
     session = null; ssSet('sk.session', null); go('login'); toast('Silindi.');
   },
-  calOpen: by => { CAL.by = by; CAL.code = by === 'clinician' ? params.code : session.code; CAL.phase = null; CAL.result = null; go('calib', params); },
+  calOpen: by => { if (by === 'family' && familyNeedsButton()) return go('famNewButton'); CAL.by = by; CAL.code = by === 'clinician' ? params.code : session.code; CAL.phase = null; CAL.result = null; go('calib', params); },
   calStart: () => {
     if (!B.connected || !B.info) return;
     if (B.info.code !== CAL.code) { alert(`Bağlı buton (${B.info.code}) bu hesaba ait değil (${CAL.code}).`); return; }
@@ -733,7 +815,7 @@ const ACTIONS = {
     session = { role: 'clinician', u }; ssSet('sk.session', session); go('clinList');
   },
   clinConnect: async () => {
-    const ok = await bleConnect(); if (!ok || !B.info) return;
+    const ok = await bleConnect({ allow: CLIN_ALLOW }); if (!ok || !B.info) return;
     const code = B.info.code, m = getMeta(code); if (!m.firstSeen) { m.firstSeen = Date.now(); setMeta(code, m); }
     go('clinPatient', { code });
   },
@@ -756,6 +838,7 @@ const ACTIONS = {
     download(`skolidata_${c}_calibration.csv`, 'time_s,skin_C,humidity_pct,phase\n' + raw.off.map(line('off')).concat(raw.on.map(line('on'))).join('\n'));
   },
 };
+let CLIN_ALLOW = null;   // server mode: only buttons of families who shared with this clinician
 function download(name, text) {
   try { navigator.clipboard && navigator.clipboard.writeText(text); } catch (e) {}
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' })); a.download = name; document.body.appendChild(a); a.click(); a.remove();
@@ -765,14 +848,16 @@ function download(name, text) {
 // ================= server (Supabase) — active only when config.js is filled in =================
 const SKCFG = window.SKOLI_CONFIG || {};
 const SRV = { on: !!(SKCFG.supabaseUrl && SKCFG.supabaseAnonKey && window.supabase), sb: null, user: null, profile: null,
-              lastPull: 0, patients: [], clinicians: [], detail: {}, owner: { clinicians: [], health: [], cities: [], audit: [] } };
+              lastPull: 0, patients: [], clinicians: [], detail: {}, owner: { clinicians: [], health: [], cities: [], audit: [], families: [] } };
 if (SRV.on) SRV.sb = window.supabase.createClient(SKCFG.supabaseUrl, SKCFG.supabaseAnonKey);
-const familyEmail = code => code.toLowerCase() + '@aile.skolidata.app';
-const PENDING_TICKET = new URLSearchParams(location.search).get('t');
+window.SRV_ON = SRV.on;
+// families have no real e-mail: a random login address, found again from the button code at login
+const newFamilyEmail = () => 'f-' + randHex(8) + '@aile.skolidata.app';
+const TAKEN_MSG = 'Bu buton başka bir hesaba bağlı. Kendi hesabınsa "Giriş yap"ı kullan. Buton sana yeni verildiyse, önceki kullanıcının ya da klinisyeninin butonu serbest bırakması gerekir (SkoliData da yardımcı olabilir).';
 const CITIES = ['Adana','Adıyaman','Afyonkarahisar','Ağrı','Aksaray','Amasya','Ankara','Antalya','Ardahan','Artvin','Aydın','Balıkesir','Bartın','Batman','Bayburt','Bilecik','Bingöl','Bitlis','Bolu','Burdur','Bursa','Çanakkale','Çankırı','Çorum','Denizli','Diyarbakır','Düzce','Edirne','Elazığ','Erzincan','Erzurum','Eskişehir','Gaziantep','Giresun','Gümüşhane','Hakkâri','Hatay','Iğdır','Isparta','İstanbul','İzmir','Kahramanmaraş','Karabük','Karaman','Kars','Kastamonu','Kayseri','Kilis','Kırıkkale','Kırklareli','Kırşehir','Kocaeli','Konya','Kütahya','Malatya','Manisa','Mardin','Mersin','Muğla','Muş','Nevşehir','Niğde','Ordu','Osmaniye','Rize','Sakarya','Samsun','Şanlıurfa','Siirt','Sinop','Sivas','Şırnak','Tekirdağ','Tokat','Trabzon','Tunceli','Uşak','Van','Yalova','Yozgat','Zonguldak'];
-const ERR_TR = { ticket_invalid: 'Bu kod geçersiz.', ticket_used: 'Bu buton zaten kayıtlı. SkoliData ile iletişime geç.', button_mismatch: 'Bağlanan buton bu kodla eşleşmiyor.',
+const ERR_TR = { button_taken: 'Bu buton başka bir hesaba bağlı.', has_button: 'Bu hesabın zaten bir butonu var.', code_invalid: 'Buton kodu geçersiz.', not_family: 'Bu bir aile hesabı değil.',
   already_registered: 'Bu hesap zaten kayıtlı.', clinician_not_found: 'Bu klinisyen kodu bulunamadı.', not_approved: 'Hesabınız henüz onaylanmadı.',
-  not_allowed: 'Bu işlem için yetkin yok.', not_owner: 'Bu işlem yalnızca SkoliData yöneticisine açık.', button_in_use: 'Bu buton şu an bir ailede kayıtlı.',
+  not_allowed: 'Bu işlem için yetkin yok.', not_owner: 'Bu işlem yalnızca SkoliData yöneticisine açık.',
   'Invalid login credentials': 'Kod/e-posta ya da şifre hatalı.', 'User already registered': 'Bu hesap zaten var. Giriş yap.',
   'Password should be': 'Şifre en az 8 karakter olmalı.', 'Failed to fetch': 'Sunucuya ulaşılamadı. İnternet bağlantını kontrol et.' };
 function trErr(e) { const m = String((e && (e.message || e.error_description)) || e); for (const k in ERR_TR) if (m.includes(k)) return ERR_TR[k]; return 'Sunucu hatası: ' + m; }
@@ -801,8 +886,8 @@ window.onSynced = async code => {
   const days = Object.values(DAYCACHE[code] || {}).filter(d => d.dataMs > 0 && !d.fromServer);
   const rows = days.map(d => ({ family_id: SRV.user.id, day: d.key, worn_min: Math.round(d.ms / 6e4), unsure_min: Math.round(d.unsureMs / 6e4),
     data_min: Math.min(1440, Math.round(d.dataMs / 6e4)), segments: d.segs.map(([a, b]) => [Math.round((a - d.start) / 6e4), Math.round((b - d.start) / 6e4)]),
-    algo: 'v1', model_at: d.modelAt || 0, updated_at: new Date().toISOString() }));
-  if (rows.length) await sv(SRV.sb.from('day_summaries').upsert(rows, { onConflict: 'family_id,day' }));
+    algo: 'v1', model_at: d.modelAt || 0, button_code: code, updated_at: new Date().toISOString() }));
+  if (rows.length) await sv(SRV.sb.from('day_summaries').upsert(rows, { onConflict: 'family_id,day,button_code' }));
   const m = getMeta(code);
   await sv(SRV.sb.from('device_status').update({ mv: m.mv || null, fw: m.fw || null, flash: B.info ? !!B.info.flash : null,
     last_sync: new Date(m.lastSync || Date.now()).toISOString() }).eq('button_code', code));
@@ -814,28 +899,50 @@ window.onCalibrated = async (code, res, by) => {
   const fid = by === 'clinician' ? (profiles()[code] || {}).familyId : SRV.user.id;
   if (!fid || (by === 'family' && SRV.profile.button_code !== code)) return;
   const d = res.details || {};
-  await sv(SRV.sb.from('calibrations').insert({ family_id: fid, by_role: by, by_id: SRV.user.id, ok: !!res.ok,
+  await sv(SRV.sb.from('calibrations').insert({ family_id: fid, button_code: code, by_role: by, by_id: SRV.user.id, ok: !!res.ok,
     toff: d.Toff ?? null, ton: d.Ton ?? null, tau_on: d.tauOn ?? null, tau_off: d.tauOff ?? null, model: res.ok ? res.model : null }));
   if (by === 'clinician') SRV.detail[code] = null;
 };
-// family: goal, goal note, clinicians and the newest calibration from the server
+// a server day row -> the app's day object
+function rowToDay(r) {
+  const day = String(r.day).slice(0, 10), start = new Date(day + 'T00:00:00').getTime();
+  return { key: day, start, ms: r.worn_min * 6e4, unsureMs: r.unsure_min * 6e4, dataMs: r.data_min * 6e4,
+           segs: (r.segments || []).map(([a, b]) => [start + a * 6e4, start + b * 6e4]), fromServer: true };
+}
+// family: goal, goal note, clinicians, the newest calibration of the current button, and the hours
 SRV.pullFamily = async (force) => {
   if (!SRV.on || !SRV.profile || SRV.profile.role !== 'family') return;
   if (!force && Date.now() - SRV.lastPull < 30000) return false;
   SRV.lastPull = Date.now();
   await SRV.loadMe();
-  const code = SRV.profile.button_code, P = profiles(), p = P[code] || (P[code] = { createdAt: Date.now() });
+  if (!SRV.profile) return false;
+  const code = SRV.profile.button_code || null;
+  let moved = false;
+  if (session && session.role === 'family' && session.code !== code) {      // button changed by the clinic or SkoliData
+    session = { role: 'family', code }; ssSet('sk.session', session); moved = true;
+    if (B.connected && B.info && B.info.code !== code) { bleDisconnect(); B.info = null; B.live = null; }
+  }
+  SRV.clinicians = await SRV.rpc('my_clinicians');
+  if (!code) return true;
+  const P = profiles(), p = P[code] || (P[code] = { createdAt: Date.now() });
   p.goal = SRV.profile.goal_h;
   const g = await sv(SRV.sb.from('goal_changes').select('*').eq('family_id', SRV.user.id).order('at', { ascending: false }).limit(20));
   p.goalHistory = g.slice().reverse().map(x => ({ from: x.from_h, to: x.to_h, by: x.by_role, at: Date.parse(x.at) }));
   p.goalNote = g[0] && g[0].by_role === 'clinician' ? { from: g[0].from_h, to: g[0].to_h, at: Date.parse(g[0].at) } : null;
   saveProfiles(P);
-  SRV.clinicians = await SRV.rpc('my_clinicians');
-  const cal = await sv(SRV.sb.from('calibrations').select('*').eq('family_id', SRV.user.id).eq('ok', true).order('created_at', { ascending: false }).limit(1));
+  const cal = await sv(SRV.sb.from('calibrations').select('*').eq('family_id', SRV.user.id).eq('button_code', code).eq('ok', true).order('created_at', { ascending: false }).limit(1));
   const local = getModel(code);
   if (cal[0] && cal[0].model && (!local || (cal[0].model.createdAt || 0) > (local.createdAt || 0))) {
     lsSet('sk.model.' + code, cal[0].model); lsSet('sk.days.' + code, {}); delete DAYCACHE[code];
   }
+  // hours: this button's days fill gaps (e.g. a new phone); other buttons' days are added on top
+  const rows = await sv(SRV.sb.from('day_summaries').select('*').eq('family_id', SRV.user.id).gte('day', dateKey(addDays(startOfDay(Date.now()), -20))));
+  const dc = DAYCACHE[code] || (DAYCACHE[code] = {}), ex = {};
+  rows.forEach(r => { const d = rowToDay(r);
+    if (r.button_code === code) { if (!dc[d.key] || !(dc[d.key].dataMs > 0)) dc[d.key] = d; }
+    else ex[d.key] = ex[d.key] ? mergeDay(ex[d.key], d) : d; });
+  EXTRA[code] = ex;
+  if (moved || !Object.keys(dc).some(k => !dc[k].fromServer)) computeDays(code).then(refresh);
   return true;
 };
 // clinician: patients + their last 20 days of hours
@@ -845,13 +952,9 @@ SRV.loadPatients = async () => {
   const rows = ids.length ? await sv(SRV.sb.from('day_summaries').select('*').in('family_id', ids).gte('day', dateKey(addDays(startOfDay(Date.now()), -20)))) : [];
   const P = profiles();
   for (const pt of SRV.patients) {
-    const code = pt.button_code, dc = DAYCACHE[code] = {};
-    rows.filter(r => r.family_id === pt.family_id).forEach(r => {
-      const day = String(r.day).slice(0, 10), start = new Date(day + 'T00:00:00').getTime();
-      dc[day] = { key: day, start, ms: r.worn_min * 6e4, unsureMs: r.unsure_min * 6e4, dataMs: r.data_min * 6e4,
-                    segs: (r.segments || []).map(([a, b]) => [start + a * 6e4, start + b * 6e4]), fromServer: true };
-    });
-    P[code] = Object.assign(P[code] || {}, { goal: pt.goal_h, familyId: pt.family_id, displayName: pt.display_name, remote: true });
+    const code = pt._key = pt.button_code || ('YOK-' + pt.family_id.slice(0, 6).toUpperCase()), dc = DAYCACHE[code] = {};
+    rows.filter(r => r.family_id === pt.family_id).forEach(r => { const d = rowToDay(r); dc[d.key] = dc[d.key] ? mergeDay(dc[d.key], d) : d; });
+    P[code] = Object.assign(P[code] || {}, { goal: pt.goal_h, familyId: pt.family_id, displayName: pt.display_name, noButton: !pt.button_code, remote: true });
     const m = getMeta(code);
     if (pt.last_sync) m.lastSync = Math.max(m.lastSync || 0, Date.parse(pt.last_sync));
     if (pt.mv) m.mv = pt.mv; if (pt.fw) m.fw = pt.fw;
@@ -862,17 +965,17 @@ SRV.loadPatients = async () => {
 SRV.loadDetail = async code => {
   const fid = (profiles()[code] || {}).familyId; if (!fid) return;
   const g = await sv(SRV.sb.from('goal_changes').select('*').eq('family_id', fid).order('at', { ascending: false }).limit(20));
-  const c = await sv(SRV.sb.from('calibrations').select('*').eq('family_id', fid).eq('ok', true).order('created_at', { ascending: false }).limit(1));
+  const c = (profiles()[code] || {}).noButton ? [] : await sv(SRV.sb.from('calibrations').select('*').eq('family_id', fid).eq('button_code', code).eq('ok', true).order('created_at', { ascending: false }).limit(1));
   SRV.detail[code] = { goals: g, cal: c[0] || null };
 };
 SRV.loadOwner = async () => {
-  const [c, h, ci, a] = await Promise.all([SRV.rpc('owner_clinicians'), SRV.rpc('owner_button_health'), SRV.rpc('owner_city_counts'), SRV.rpc('owner_audit_log', { p_limit: 30 })]);
-  Object.assign(SRV.owner, { clinicians: c, health: h, cities: ci, audit: a, loaded: Date.now() });
+  const [c, h, ci, a, f] = await Promise.all([SRV.rpc('owner_clinicians'), SRV.rpc('owner_button_health'), SRV.rpc('owner_city_counts'), SRV.rpc('owner_audit_log', { p_limit: 30 }), SRV.rpc('owner_families')]);
+  Object.assign(SRV.owner, { clinicians: c, health: h, cities: ci, audit: a, families: f, loaded: Date.now() });
 };
 async function routeAfterLogin() {
   const p = SRV.profile;
   if (!p) return go('login');
-  if (p.role === 'family') { session = { role: 'family', code: p.button_code }; ssSet('sk.session', session); await SRV.pullFamily(true); return go('famHome'); }
+  if (p.role === 'family') { session = { role: 'family', code: p.button_code || null }; ssSet('sk.session', session); await SRV.pullFamily(true); return go('famHome'); }
   session = { role: p.role === 'owner' ? 'owner' : 'clinician', u: SRV.user.email }; ssSet('sk.session', session);
   if (p.role === 'owner') { await SRV.loadOwner(); return go('owner'); }
   if (!p.approved) return go('clinPending');
@@ -893,27 +996,20 @@ if (SRV.on) {
     <button class="btn primary" data-act="famLoginBtn">Giriş yap</button>
     <button class="btn text" data-act="forgot" style="align-self:center">Şifremi unuttum</button>
     <div style="flex:1"></div>
-    <section class="card"><b>İlk kez mi kullanıyorsun?</b><p class="small" style="margin:4px 0 10px">Butonunun üstündeki karekodu telefonunun kamerasıyla okut ya da altındaki 16 harfli kodu gir.</p>
-    <button class="btn secondary" data-act="go" data-arg="famTicket">Hesap oluştur</button></section>
+    <section class="card"><b>İlk kez mi kullanıyorsun?</b><p class="small" style="margin:4px 0 10px">Korsendeki butonu telefona yaklaştır ve bağlan. Bağladığın ilk buton hesabının butonu olur.</p>
+    <button class="btn secondary" data-act="go" data-arg="famConnect">Hesap oluştur</button></section>
   </main>`;
-  SCREENS.famTicket = p => `<main>${backBtn('famLogin')}
-    <div class="steps"><i class="on"></i><i></i><i></i><i></i><i></i></div>
-    <h1>Kayıt kodu</h1>
-    <p class="sub">Butonun üstündeki etiketteki 16 harfli kodu gir. Karekodu okuttuysan kendiliğinden dolar.</p>
-    <label class="f">Kayıt kodu<input class="in" id="tk" placeholder="XXXX-XXXX-XXXX-XXXX" autocapitalize="characters" value="${esc(p.ticket || PENDING_TICKET || '')}"></label>
-    <p class="err" id="err"></p><div style="flex:1"></div>
-    <button class="btn primary" data-act="famTicketNext">Devam</button>
-  </main>`;
-  SCREENS.famConnect = p => `<main>${backBtn('famTicket')}
-    <div class="steps"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></div>
+  SCREENS.famConnect = () => `<main>${backBtn('famLogin')}
+    <div class="steps"><i class="on"></i><i></i><i></i><i></i></div>
     <h1>Butonunu bağla</h1>
-    <p class="sub">Kod <b>${esc(p.expected || '')}</b> butonuna ait. Şimdi bu butonu telefona yaklaştır ve bağlan; doğru buton olduğunu kontrol edeceğiz.</p>
+    <p class="sub">Korsendeki butonu telefona yaklaştır. Bluetooth açık olsun.</p>
+    <div class="note"><b>İlk bağladığın buton senin butonun olur</b>Hesabın bundan sonra yalnızca bu butonla çalışır. Giriş yaparken butonun kodunu kullanırsın; e-posta ya da telefon numarası gerekmez.</div>
     <div style="flex:1"></div>
     ${B.syncing ? '<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>' : ''}
     <button class="btn primary" data-act="famConnectBtn" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>
   </main>`;
-  SCREENS.famPass = p => `<main>${backBtn('famTicket')}
-    <div class="steps"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></div>
+  SCREENS.famPass = p => `<main>${backBtn('famConnect')}
+    <div class="steps"><i class="on"></i><i class="on"></i><i></i><i></i></div>
     <h1>Şifre oluştur</h1>
     <p class="sub">Giriş yaparken buton kodunu (<b>${esc(p.code)}</b>) ve bu şifreyi kullanacaksın.</p>
     <label class="f">Şifre (en az 8 karakter)<input class="in" id="pw1" type="password" autocomplete="new-password"></label>
@@ -921,8 +1017,8 @@ if (SRV.on) {
     <p class="err" id="err"></p><div style="flex:1"></div>
     <button class="btn primary" data-act="famPassSave">Devam</button>
   </main>`;
-  SCREENS.famConsent = p => `<main>${backBtn('famTicket')}
-    <div class="steps"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+  SCREENS.famConsent = p => `<main>${backBtn('famConnect')}
+    <div class="steps"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
     <h1>Onay</h1>
     <label class="f">Yaşadığın şehir<select class="in" id="city">${cityOptions(p.city)}</select></label>
     <section class="card" style="display:flex;flex-direction:column;gap:10px;font-size:15px">${CONSENT_SRV}</section>
@@ -946,17 +1042,11 @@ if (SRV.on) {
     return html.replace('<section class="card list">\n    <button class="li" data-act="showConsent">', extra + '\n  <section class="card list">\n    <button class="li" data-act="showConsent">');
   };
   ACTIONS.famStart = () => { if (session && session.role === 'family' && SRV.profile) return go('famHome'); go('famLogin'); };
-  ACTIONS.famTicketNext = async () => {
-    const t = $('#tk').value.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
-    if (t.length !== 16) { $('#err').textContent = 'Kod 16 harf/rakam olmalı.'; return; }
-    busy(true);
-    try { const code = await SRV.rpc('check_ticket', { p_ticket: t }); if (!code) { $('#err').textContent = 'Bu kod geçersiz ya da daha önce kullanılmış.'; return; } go('famConnect', { ticket: t, expected: code }); }
-    catch (e) { $('#err').textContent = trErr(e); } finally { busy(false); }
-  };
+  // sign-up: the connected button must be free; nothing is stored from a button that belongs to someone else
   ACTIONS.famConnectBtn = async () => {
-    const ok = await bleConnect(); if (!ok || !B.info) return;
-    if (B.info.code !== params.expected) { alert(`Bağlanan buton (${B.info.code}) bu kayıt koduna ait değil (${params.expected}). Doğru butonu bağla.`); return; }
-    go('famPass', Object.assign({}, params, { code: B.info.code }));
+    const ok = await bleConnect({ allow: async c => (await SRV.rpc('button_taken', { p_code: c })) ? TAKEN_MSG : null });
+    if (!ok || !B.info) return;
+    go('famPass', { code: B.info.code });
   };
   ACTIONS.famPassSave = () => {
     const a = $('#pw1').value, b = $('#pw2').value;
@@ -974,9 +1064,9 @@ if (SRV.on) {
     const goal = params.goal || 16, code = params.code;
     busy(true);
     try {
-      try { await SRV.signUp(familyEmail(code), params.password); }
-      catch (e) { if (String(e.message).includes('already registered')) await SRV.signIn(familyEmail(code), params.password); else throw e; }
-      if (!SRV.profile) await SRV.rpc('claim_ticket', { p_ticket: params.ticket, p_code: code, p_city: params.city, p_goal: goal, p_consent_version: 'v2-taslak' });
+      if (!SRV.user || SRV.profile) { if (SRV.profile) await SRV.signOut(); await SRV.signUp(newFamilyEmail(), params.password); }
+      try { await SRV.rpc('claim_button', { p_code: code, p_city: params.city, p_goal: goal, p_consent_version: 'v2-taslak' }); }
+      catch (e) { try { await SRV.rpc('delete_my_account'); } catch (x) {} await SRV.signOut(); throw e; }   // don't leave an empty login behind
       await SRV.loadMe();
       const P = profiles(); P[code] = { goal, goalHistory: [{ to: goal, by: 'family', at: Date.now() }], createdAt: Date.now(), consentAt: params.consentAt, server: true }; saveProfiles(P);
       const m = getMeta(code); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(code, m);
@@ -984,17 +1074,51 @@ if (SRV.on) {
       try { await window.onSynced(code); } catch (e) {}
       params = {}; CAL.phase = null; CAL.code = code; CAL.by = 'family';
       go('calib');
-    } catch (e) { alert(trErr(e)); } finally { busy(false); }
+    } catch (e) { alert(String(e.message || e).includes('button_taken') ? TAKEN_MSG : trErr(e)); } finally { busy(false); }
   };
+  // login: button code -> the account(s) it may belong to; the password decides
   ACTIONS.famLoginBtn = async () => {
     const code = $('#lc').value.trim().toUpperCase(), pw = $('#lp').value;
     if (!/^SK-[0-9A-Z]{8}$/.test(code)) { $('#err').textContent = 'Buton kodu SK- ile başlar ve 8 harf/rakamdan oluşur.'; return; }
     busy(true);
     try {
-      const p = await SRV.signIn(familyEmail(code), pw);
-      if (!p || p.role !== 'family') { await SRV.signOut(); $('#err').textContent = 'Bu kodla kayıtlı bir hesap yok.'; return; }
-      await routeAfterLogin();
+      const list = await SRV.rpc('family_login_emails', { p_code: code }) || [];
+      if (!list.length) { $('#err').textContent = 'Bu kodla kayıtlı bir hesap yok.'; return; }
+      for (const em of list) {
+        try { const p = await SRV.signIn(em, pw); if (p && p.role === 'family') return await routeAfterLogin(); await SRV.signOut(); }
+        catch (e) { if (!String(e.message || e).includes('Invalid login')) throw e; }
+      }
+      $('#err').textContent = 'Kod ya da şifre hatalı.';
     } catch (e) { $('#err').textContent = trErr(e); } finally { busy(false); }
+  };
+  // change button (server): password checked by the server, then the button is freed
+  ACTIONS.famResetGo = async () => {
+    const pw = $('#rp').value;
+    busy(true);
+    try {
+      const { error } = await SRV.sb.auth.signInWithPassword({ email: SRV.user.email, password: pw });
+      if (error) { $('#err').textContent = 'Şifre hatalı.'; return; }
+      await SRV.rpc('release_my_button'); await SRV.loadMe();
+      bleDisconnect(); B.info = null; B.live = null;
+      session = { role: 'family', code: null }; ssSet('sk.session', session);
+      go('famNewButton'); toast('Buton sıfırlandı. Yeni butonunu bağlayabilirsin.');
+    } catch (e) { $('#err').textContent = trErr(e); } finally { busy(false); }
+  };
+  ACTIONS.famNewButtonBtn = async () => {
+    const ok = await bleConnect({ allow: async c => (await SRV.rpc('button_taken', { p_code: c })) ? TAKEN_MSG : null });
+    if (!ok || !B.info) return;
+    const c = B.info.code;
+    busy(true);
+    try {
+      await SRV.rpc('attach_my_button', { p_code: c });
+      await SRV.loadMe();
+      session = { role: 'family', code: c }; ssSet('sk.session', session);
+      const m = getMeta(c); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(c, m);
+      await SRV.pullFamily(true);
+      try { await window.onSynced(c); } catch (e) {}
+      CAL.phase = null; CAL.result = null; CAL.code = c; CAL.by = 'family';
+      go('calib'); toast('Yeni butonun bağlandı: ' + c);
+    } catch (e) { alert(String(e.message || e).includes('button_taken') ? TAKEN_MSG : trErr(e)); } finally { busy(false); }
   };
   ACTIONS.famGoalAdj = async d => {
     const p = profiles()[session.code] || {}, to = Math.min(23, Math.max(1, (p.goal || 16) + +d));
@@ -1016,9 +1140,8 @@ if (SRV.on) {
   ACTIONS.famDelete = async () => {
     if (!confirm('Hesabın ve sunucudaki tüm verilerin kalıcı olarak silinecek. Emin misin?')) return;
     try { await SRV.rpc('delete_my_account'); } catch (e) { alert(trErr(e)); return; }
-    const c = session.code, P = profiles(); delete P[c]; saveProfiles(P);
-    ['sk.meta.', 'sk.model.', 'sk.days.', 'sk.calraw.', 'sk.calhist.'].forEach(k => lsDel(k + c));
-    await deleteCode(c); delete DAYCACHE[c];
+    const c = session.code, P = profiles();
+    if (c) { delete P[c]; saveProfiles(P); ['sk.meta.', 'sk.model.', 'sk.days.', 'sk.calraw.', 'sk.calhist.'].forEach(k => lsDel(k + c)); await deleteCode(c); delete DAYCACHE[c]; }
     await SRV.signOut(); session = null; ssSet('sk.session', null); go('login'); toast('Hesabın silindi.');
   };
   ACTIONS.logout = async () => { await SRV.signOut(); session = null; ssSet('sk.session', null); go('login'); };
@@ -1061,6 +1184,8 @@ if (SRV.on) {
       .replace('<p class="small">Bu sürümde yalnızca bu telefona senkronize edilen butonlar görünür. Sunucu bağlantısı sonraki adım.</p>', '<button class="btn text" data-act="clinRefresh" style="align-self:center">Yenile</button>');
   };
   SCREENS.clinList.after = () => {};
+  clinCodes = () => SRV.patients.map(pt => pt._key);
+  CLIN_ALLOW = async c => SRV.patients.some(pt => pt.button_code === c) ? null : 'Bu buton sizinle paylaşan bir aileye bağlı değil. Aile önce klinisyen kodunuzu girmeli.';
   const baseClinPatient = SCREENS.clinPatient;
   SCREENS.clinPatient = p => {
     const d = SRV.detail[p.code];
@@ -1072,6 +1197,13 @@ if (SRV.on) {
     let html = baseClinPatient(p);
     if (name) html = html.replace(`<h1>${esc(p.code)}</h1>`, `<h1>${esc(name)}</h1><p class="sub" style="margin-top:-8px">${esc(p.code)}</p>`);
     if (d && d.cal) html = html.replace(/(<span class="k">Kalibrasyon<\/span><span class="v">)[^<]*/, `$1${fmtDate(Date.parse(d.cal.created_at))} · ${d.cal.by_role === 'clinician' ? 'klinisyen' : 'aile'}`);
+    if ((profiles()[p.code] || {}).noButton) {
+      html = html.replace(`<p class="sub" style="margin-top:-8px">${esc(p.code)}</p>`, '<p class="sub" style="margin-top:-8px">Şu an butonu yok</p>')
+        .replace(/<button class="btn secondary" data-act="clinConnect">[^<]*<\/button>/, '')
+        .replace(/<button class="btn primary" data-act="calOpen"[^>]*>[^<]*<\/button>/, '<div class="note"><b>Butonu yok</b>Aile yeni butonunu kendi uygulamasından bağlayabilir; saatleri yeniden gelmeye başlar.</div>');
+    } else {
+      html = html.replace('<button class="btn text" data-act="openRaw"', `<button class="btn text" data-act="clinRelease" style="align-self:center">Butonu bu aileden ayır</button>\n  <button class="btn text" data-act="openRaw"`);
+    }
     return html;
   };
   SCREENS.clinPatient.after = p => { if (SRV.detail[p.code] === undefined || SRV.detail[p.code] === null) { SRV.detail[p.code] = false; SRV.loadDetail(p.code).then(refresh).catch(e => toast(trErr(e))); } };
@@ -1105,77 +1237,96 @@ if (SRV.on) {
     catch (e) { toast(trErr(e)); }
   };
   ACTIONS.clinConnect = async () => {
-    const ok = await bleConnect(); if (!ok || !B.info) return;
-    const code = B.info.code;
-    if (!profiles()[code] || !profiles()[code].familyId) { toast('Bu buton sizinle paylaşılmamış. Aile önce kodunuzu girmeli.'); return; }
-    go('clinPatient', { code });
+    const ok = await bleConnect({ allow: CLIN_ALLOW }); if (!ok || !B.info) return;
+    go('clinPatient', { code: B.info.code });
+  };
+  // the button came back to the clinic: free it (two warnings) so the next family can sign up with it
+  ACTIONS.clinRelease = async () => {
+    const code = params.code, pr = profiles()[code] || {}, who = pr.displayName || code;
+    if (!confirm(`${code} butonu ${who} hesabından ayrılsın mı?\n\nAilenin geçmiş saatleri ve sizinle paylaşımı kalır. Aile yeni bir buton bağlayana kadar saat kaydedilmez.`)) return;
+    if (!confirm(`Son uyarı: ${code} artık ${who} için veri göndermeyecek ve başka bir aileye verilebilecek. Ayırmak istediğinize emin misiniz?`)) return;
+    try {
+      await SRV.rpc('clinician_release_button', { p_family: pr.familyId });
+      if (B.connected && B.info && B.info.code === code) bleDisconnect();
+      delete profiles()[code]; const P = profiles(); delete P[code]; saveProfiles(P); delete DAYCACHE[code];
+      await SRV.loadPatients(); go('clinList'); toast(`${code} serbest. Yeni aile bu butonla hesap oluşturabilir.`);
+    } catch (e) { toast(trErr(e)); }
   };
 
   // ---------- owner ----------
+  const famName = f => f.display_name || `İsimsiz (${f.city || 'şehir yok'})`;
   SCREENS.owner = () => {
     const o = SRV.owner, pending = o.clinicians.filter(c => !c.approved), approved = o.clinicians.filter(c => c.approved);
     const stale = h => !h.last_sync || Date.now() - Date.parse(h.last_sync) > 3 * 864e5;
-    const healthRow = h => `<div class="li"><span><span class="k">${esc(h.code)}</span><br><span class="small">${h.assigned ? 'ailede' : h.ticket_open ? 'kod bekliyor' : 'boşta'} · ${h.fw ? esc(h.fw) : '–'} · ${h.flash === false ? 'flash yok · ' : ''}${h.last_sync ? ago(Date.parse(h.last_sync)) : 'hiç senkron yok'}</span></span><span class="chip">${!h.assigned ? '⚪ boşta' : stale(h) ? '⚪ 3+ gün yok' : h.mv && h.mv < 2750 ? '🔵 pil az' : '🟢 çalışıyor'}</span></div>`;
+    const healthRow = h => `<div class="li"><span><span class="k">${esc(h.code)}</span><br><span class="small">${h.assigned ? esc(h.family_name || 'ailede') : 'boşta'} · ${h.fw ? esc(h.fw) : '–'} · ${h.flash === false ? 'flash yok · ' : ''}${h.last_sync ? ago(Date.parse(h.last_sync)) : 'hiç senkron yok'}</span></span><span class="chip">${!h.assigned ? '⚪ boşta' : stale(h) ? '⚪ 3+ gün yok' : h.mv && h.mv < 2750 ? '🔵 pil az' : '🟢 çalışıyor'}</span></div>`;
+    const famRow = f => `<button class="li" data-act="ownerOpenFam" data-arg="${esc(f.id)}"><span><span class="k">${esc(famName(f))}</span><br><span class="small">${esc(f.city || '')} · ${f.button_code ? esc(f.button_code) : 'buton yok'}${f.clinicians ? ' · ' + f.clinicians + ' klinisyen' : ''}${f.button_code ? ' · ' + (f.last_sync ? ago(Date.parse(f.last_sync)) : 'senkron yok') : ''}</span></span><span class="v">›</span></button>`;
     return `<main>
     <header class="row"><div><div class="sub">SkoliData yönetici</div><h1>Yönetim</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
     <section class="card list"><div class="li"><span class="k">Onay bekleyen klinisyenler</span><span class="v">${pending.length}</span></div>
       ${pending.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${esc(c.email)} · ${esc(c.city || '')}</span></span><span style="display:flex;gap:4px"><button class="btn text" data-act="ownerApprove" data-arg="${c.id}">Onayla</button><button class="btn text" data-act="ownerReject" data-arg="${c.id}">Reddet</button></span></div>`).join('') || '<p class="small">Bekleyen yok.</p>'}
     </section>
+    <section class="card list"><div class="li"><span class="k">Aileler ve butonları</span><span class="v">${o.families.length}</span></div>
+      ${o.families.map(famRow).join('') || '<p class="small">Henüz aile yok.</p>'}
+      <p class="small">Bir aileye dokun: saatlerini gör, butonunu değiştir ya da ayır.</p>
+    </section>
     <section class="card list"><div class="li"><span class="k">Klinisyenler</span><span class="v">${approved.length}</span></div>
       ${approved.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${esc(c.code || '')} · ${c.patients} aile</span></span></div>`).join('') || '<p class="small">Henüz yok.</p>'}
     </section>
-    <section class="card"><b>Yeni buton kaydı</b><p class="small" style="margin:4px 0 8px">Mühürlemeden önce: butonu bağla (ya da kodunu yaz), tek kullanımlık kayıt kodunu oluştur, etiketi yazdır.</p>
-      <label class="f">Buton kodu<input class="in" id="bc" placeholder="SK-XXXXXXXX" autocapitalize="characters" value="${esc(B.info && B.info.code || '')}"></label>
-      <div class="grid2" style="margin-top:10px"><button class="btn secondary" data-act="ownerReadButton">Butonu bağla</button><button class="btn primary" data-act="ownerTicket">Kayıt kodu üret</button></div></section>
     <section class="card list"><div class="li"><span class="k">Buton sağlığı</span><span class="v">${o.health.length}</span></div>${o.health.map(healthRow).join('') || '<p class="small">Henüz buton yok.</p>'}</section>
     <section class="card list"><div class="li"><span class="k">Şehirler</span><span class="v">aile · klinisyen</span></div>${o.cities.map(c => `<div class="li"><span class="k">${esc(c.city)}</span><span class="v">${c.families} · ${c.clinicians}</span></div>`).join('') || '<p class="small">Veri yok.</p>'}<p class="small">1–4 arası sayılar gizlilik için "1-4" gösterilir.</p></section>
-    <section class="card"><b>Aile verisi</b><p class="small" style="margin:4px 0 8px">Her görüntüleme erişim günlüğüne yazılır.</p>
-      <label class="f">Buton kodu<input class="in" id="fc" placeholder="SK-XXXXXXXX" autocapitalize="characters"></label>
-      <button class="btn secondary" data-act="ownerFamily" style="margin-top:10px">Saatleri göster</button>
-      <div id="famOut"></div>
-      <button class="btn text" data-act="ownerRelease" style="margin-top:6px">Butonu serbest bırak (geri geldi)</button></section>
-    <section class="card list"><div class="li"><span class="k">Erişim günlüğü</span><span></span></div>${o.audit.slice(0, 15).map(a => `<div class="li"><span class="small">${new Date(a.at).toLocaleString('tr-TR')}</span><span class="v">${esc(a.action)}${a.detail && a.detail.code ? ' · ' + esc(a.detail.code) : ''}</span></div>`).join('') || '<p class="small">Boş.</p>'}</section>
+    <section class="card list"><div class="li"><span class="k">Erişim günlüğü</span><span></span></div>${o.audit.slice(0, 15).map(a => `<div class="li"><span class="small">${new Date(a.at).toLocaleString('tr-TR')}</span><span class="v">${esc(a.action)}${a.detail && a.detail.code ? ' · ' + esc(a.detail.code) : ''}${a.detail && a.detail.by ? ' · ' + esc(a.detail.by) : ''}</span></div>`).join('') || '<p class="small">Boş.</p>'}</section>
     <button class="btn text" data-act="ownerRefresh" style="align-self:center">Yenile</button>
   </main>`;
   };
-  SCREENS.ownerTicket = p => `<main>${backBtn('owner', 'Yönetim')}
-    <h1>Kayıt kodu</h1>
-    <section class="card center" id="label" style="display:flex;flex-direction:column;align-items:center;gap:8px">
-      <div id="qr" style="width:180px;height:180px"></div>
-      <b style="font-size:20px;letter-spacing:.06em">${esc(p.ticket.match(/.{4}/g).join('-'))}</b>
-      <span class="small">${esc(p.code)} · skolidata</span></section>
-    <div class="note"><b>Tek seferlik</b>Bu kod yalnızca şimdi gösterilir ve sunucuda saklanmaz. Etiketi şimdi yazdır ya da kodu not al.</div>
-    <button class="btn primary" data-act="ownerPrint">Etiketi yazdır</button>
+  // one family: hours (logged) + button assignment
+  SCREENS.ownerFam = p => {
+    const f = SRV.owner.families.find(x => x.id === p.id);
+    if (!f) return `<main>${backBtn('owner', 'Yönetim')}<p class="small">Aile bulunamadı.</p></main>`;
+    const hours = p.hours ? (p.hours.length ? `<div class="list" style="margin-top:8px">${p.hours.map(r => `<div class="li"><span class="k">${esc(String(r.day).slice(0, 10))}</span><span class="v">${fmtH1(r.worn_min * 6e4)} sa / hedef ${r.goal_h}${r.unsure_min ? ' · emin değil ' + fmtH1(r.unsure_min * 6e4) : ''}</span></div>`).join('')}</div>` : '<p class="small">Veri yok.</p>') : '';
+    const read = B.info && B.info.code && B.info.code !== f.button_code ? B.info.code : '';
+    return `<main>${backBtn('owner', 'Yönetim')}
+    <h1>${esc(famName(f))}</h1>
+    <section class="card list">
+      <div class="li"><span class="k">Şehir</span><span class="v">${esc(f.city || '–')}</span></div>
+      <div class="li"><span class="k">Butonu</span><span class="v">${f.button_code ? esc(f.button_code) : 'yok' + (f.last_button_code ? ' (son: ' + esc(f.last_button_code) + ')' : '')}</span></div>
+      <div class="li"><span class="k">Son senkron</span><span class="v">${f.button_code && f.last_sync ? ago(Date.parse(f.last_sync)) : '–'}</span></div>
+      <div class="li"><span class="k">Hedef</span><span class="v">${f.goal_h || '–'} sa</span></div>
+      <div class="li"><span class="k">Klinisyen</span><span class="v">${f.clinicians}</span></div>
+      <div class="li"><span class="k">Kayıt</span><span class="v">${fmtDate(Date.parse(f.created_at))}</span></div>
+    </section>
+    <section class="card"><b>Buton ataması</b><p class="small" style="margin:4px 0 8px">Bu aileye başka bir buton ver. Buton başka bir ailedeyse ondan alınır. Her değişiklik erişim günlüğüne yazılır.</p>
+      <label class="f">Buton kodu<input class="in" id="ac" placeholder="SK-XXXXXXXX" autocapitalize="characters" value="${esc(read)}"></label>
+      <div class="grid2" style="margin-top:10px"><button class="btn secondary" data-act="ownerReadButton">Butonu oku</button><button class="btn primary" data-act="ownerAssign">Bu butonu ver</button></div>
+      ${f.button_code ? `<button class="btn text" data-act="ownerUnassign" style="margin-top:6px">Butonu bu aileden ayır</button>` : ''}
+    </section>
+    <section class="card"><b>Saatler</b><p class="small" style="margin:4px 0 8px">Her görüntüleme erişim günlüğüne yazılır.</p>
+      <button class="btn secondary" data-act="ownerHours">Saatleri göster</button>${hours}</section>
   </main>`;
-  SCREENS.ownerTicket.after = p => {
-    const url = location.origin + location.pathname + '?t=' + p.ticket;
-    const draw = () => { const q = window.qrcode(0, 'M'); q.addData(url); q.make(); const el = $('#qr'); if (el) el.innerHTML = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); };
-    if (window.qrcode) draw(); else { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'; s.onload = draw; s.onerror = () => { const el = $('#qr'); if (el) el.innerHTML = '<p class="small">Karekod yüklenemedi; kodu elle yaz.</p>'; }; document.head.appendChild(s); }
   };
   ACTIONS.ownerRefresh = async () => { try { await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerApprove = async id => { try { const code = await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: true }); toast('Onaylandı: ' + code); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerReject = async id => { if (!confirm('Bu klinisyen onaylanmayacak. Emin misin?')) return; try { await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: false }); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
-  ACTIONS.ownerReadButton = async () => { const ok = await bleConnect(); if (ok && B.info) { render(); toast('Buton: ' + B.info.code); } };
-  ACTIONS.ownerTicket = async () => {
-    const code = $('#bc').value.trim().toUpperCase();
-    if (!/^SK-[2-9A-HJ-NP-Z]{8}$/.test(code)) { toast('Buton kodu SK-XXXXXXXX biçiminde olmalı.'); return; }
-    try { const r = await SRV.rpc('owner_create_buttons', { p_codes: [code] }); go('ownerTicket', { code: r[0].code, ticket: r[0].ticket }); SRV.loadOwner().catch(() => {}); }
+  ACTIONS.ownerOpenFam = id => go('ownerFam', { id });
+  ACTIONS.ownerReadButton = async () => { const ok = await bleConnect({ infoOnly: true }); if (ok && B.info) { render(); toast('Buton: ' + B.info.code); } };
+  ACTIONS.ownerHours = async () => {
+    try { const rows = await SRV.rpc('owner_family_overview', { p_family: params.id }); go('ownerFam', { id: params.id, hours: rows }); SRV.loadOwner().catch(() => {}); }
     catch (e) { toast(trErr(e)); }
   };
-  ACTIONS.ownerPrint = () => { const w = window.open('', '_blank'); if (!w) { window.print(); return; } w.document.write(`<!doctype html><meta charset="utf-8"><title>SkoliData etiket</title><body style="font-family:sans-serif;text-align:center">${$('#label').innerHTML}<script>setTimeout(()=>print(),300)<\/script></body>`); w.document.close(); };
-  ACTIONS.ownerFamily = async () => {
-    const code = $('#fc').value.trim().toUpperCase();
-    try {
-      const rows = await SRV.rpc('owner_family_overview', { p_code: code });
-      $('#famOut').innerHTML = rows.length ? `<div class="list" style="margin-top:8px">${rows.map(r => `<div class="li"><span class="k">${esc(String(r.day).slice(0, 10))}</span><span class="v">${fmtH1(r.worn_min * 6e4)} sa / hedef ${r.goal_h}${r.unsure_min ? ' · emin değil ' + fmtH1(r.unsure_min * 6e4) : ''}</span></div>`).join('')}</div>` : '<p class="small">Veri yok.</p>';
-      SRV.loadOwner().catch(() => {});
-    } catch (e) { toast(trErr(e)); }
-  };
-  ACTIONS.ownerRelease = async () => {
-    const code = $('#fc').value.trim().toUpperCase();
+  ACTIONS.ownerAssign = async () => {
+    const code = $('#ac').value.trim().toUpperCase(), f = SRV.owner.families.find(x => x.id === params.id);
     if (!/^SK-[2-9A-HJ-NP-Z]{8}$/.test(code)) { toast('Buton kodu SK-XXXXXXXX biçiminde olmalı.'); return; }
-    if (!confirm(code + ' aileden ayrılacak. Ailenin geçmiş saatleri hesabında kalır, ama bu butonla yeni veri gelmez. Emin misin?')) return;
-    try { await SRV.rpc('owner_release_button', { p_code: code }); toast(code + ' serbest. Yeni aile için kayıt kodu üretebilirsin.'); await SRV.loadOwner(); render(); }
+    if (code === f.button_code) { toast('Bu buton zaten bu ailede.'); return; }
+    const other = SRV.owner.families.find(x => x.button_code === code);
+    const msg = other ? `${code} şu an başka bir ailede: ${famName(other)}.\n\nOndan alınıp bu aileye verilecek: ${famName(f)}\n\nÖnceki aile yeni buton bağlayana kadar saat kaydedemez. Emin misin?`
+                      : `${code} bu aileye verilsin mi: ${famName(f)}?${f.button_code ? ` Şu anki butonu (${f.button_code}) boşa çıkar.` : ''}`;
+    if (!confirm(msg)) return;
+    try { await SRV.rpc('owner_assign_button', { p_family: f.id, p_code: code }); await SRV.loadOwner(); go('ownerFam', { id: f.id }); toast(`${code} → ${famName(f)}`); }
+    catch (e) { toast(trErr(e)); }
+  };
+  ACTIONS.ownerUnassign = async () => {
+    const f = SRV.owner.families.find(x => x.id === params.id);
+    if (!confirm(`${f.button_code} bu aileden ayrılsın mı: ${famName(f)}?\n\nAilenin saatleri hesabında kalır. Aile yeni buton bağlayana kadar saat kaydedemez.`)) return;
+    try { await SRV.rpc('owner_assign_button', { p_family: f.id, p_code: '' }); await SRV.loadOwner(); go('ownerFam', { id: f.id }); toast('Buton boşa çıktı.'); }
     catch (e) { toast(trErr(e)); }
   };
   LIVE.add('famConnect');
@@ -1185,8 +1336,7 @@ if (SRV.on) {
 (async () => {
   if (SRV.on) {
     try { await SRV.loadMe(); } catch (e) {}
-    if (SRV.profile && !PENDING_TICKET) { try { return await routeAfterLogin(); } catch (e) { toast(trErr(e)); } }
-    if (PENDING_TICKET && !SRV.profile) { screen = 'famTicket'; params = { ticket: PENDING_TICKET }; }
+    if (SRV.profile) { try { return await routeAfterLogin(); } catch (e) { toast(trErr(e)); } }
     render();
     return;
   }
