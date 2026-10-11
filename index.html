@@ -1398,6 +1398,9 @@ if (SRV.on) {
   else if (session && session.role === 'clinician') screen = 'clinList';
   render();
 })();
+// keep-alive for firmware v0.5: the button closes a connection after 20 min without any message (so a forgotten
+// phone can't drain the coin cell). While the app is open on screen and connected, say "k" every 4 min.
+setInterval(() => { if (B.connected && !B.syncing && document.visibilityState === 'visible') send('k'); }, 240000);
 setInterval(() => { if (screen === 'famHome' || screen === 'clinPatient') { const c = screen === 'famHome' ? session && session.code : params.code; if (c && B.connected) computeDays(c, 2).then(() => { refresh(); }); } }, 60000);
 </script>
 </body>
