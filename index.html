@@ -90,7 +90,7 @@ const APP_VERSION = 'app v1.0 · algo v1';
 const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e', NUS_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e', NUS_TX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 // Clinician accounts: only a salted SHA-256 of the password is stored here (never the password itself).
 // NOTE: this is a front door for testing, not real security; real accounts need the server (master plan §6-7).
-const CLINICIANS = [{ u: 'klinisyen', salt: '060785deb17a84e5a7b5431cf4c844bb', hash: '757024313534ac340061ad41847cc77f2e50bee7e553b2dfcf3d519eb9f2002d', name: 'Klinisyen' }];
+const CLINICIANS = [{ u: 'klinisyen', salt: '5421f45dc65f8046e7b1231c5b5fc80f', hash: 'e4a095d63996a4ced0aa39f2d3f0633b469adc340db00dc81c4b7dc6f3d909c1', name: 'Klinisyen' }];
 const DEFAULT_MODEL = { version: 1, createdAt: 0, isDefault: true, Toff: 24, Ton: 33.5, gap: 9.5, thrOn: 29.7, thrOff: 27.8, tauOn: 100, tauOff: 150, lagOn: 92, lagOff: 137 };
 const DAYS_TR = ['Pz', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'];
 const MONTHS_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
