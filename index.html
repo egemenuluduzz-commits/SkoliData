@@ -1132,7 +1132,8 @@ if (SRV.on) {
     <section class="card"><b>Aile verisi</b><p class="small" style="margin:4px 0 8px">Her görüntüleme erişim günlüğüne yazılır.</p>
       <label class="f">Buton kodu<input class="in" id="fc" placeholder="SK-XXXXXXXX" autocapitalize="characters"></label>
       <button class="btn secondary" data-act="ownerFamily" style="margin-top:10px">Saatleri göster</button>
-      <div id="famOut"></div></section>
+      <div id="famOut"></div>
+      <button class="btn text" data-act="ownerRelease" style="margin-top:6px">Butonu serbest bırak (geri geldi)</button></section>
     <section class="card list"><div class="li"><span class="k">Erişim günlüğü</span><span></span></div>${o.audit.slice(0, 15).map(a => `<div class="li"><span class="small">${new Date(a.at).toLocaleString('tr-TR')}</span><span class="v">${esc(a.action)}${a.detail && a.detail.code ? ' · ' + esc(a.detail.code) : ''}</span></div>`).join('') || '<p class="small">Boş.</p>'}</section>
     <button class="btn text" data-act="ownerRefresh" style="align-self:center">Yenile</button>
   </main>`;
@@ -1169,6 +1170,13 @@ if (SRV.on) {
       $('#famOut').innerHTML = rows.length ? `<div class="list" style="margin-top:8px">${rows.map(r => `<div class="li"><span class="k">${esc(String(r.day).slice(0, 10))}</span><span class="v">${fmtH1(r.worn_min * 6e4)} sa / hedef ${r.goal_h}${r.unsure_min ? ' · emin değil ' + fmtH1(r.unsure_min * 6e4) : ''}</span></div>`).join('')}</div>` : '<p class="small">Veri yok.</p>';
       SRV.loadOwner().catch(() => {});
     } catch (e) { toast(trErr(e)); }
+  };
+  ACTIONS.ownerRelease = async () => {
+    const code = $('#fc').value.trim().toUpperCase();
+    if (!/^SK-[2-9A-HJ-NP-Z]{8}$/.test(code)) { toast('Buton kodu SK-XXXXXXXX biçiminde olmalı.'); return; }
+    if (!confirm(code + ' aileden ayrılacak. Ailenin geçmiş saatleri hesabında kalır, ama bu butonla yeni veri gelmez. Emin misin?')) return;
+    try { await SRV.rpc('owner_release_button', { p_code: code }); toast(code + ' serbest. Yeni aile için kayıt kodu üretebilirsin.'); await SRV.loadOwner(); render(); }
+    catch (e) { toast(trErr(e)); }
   };
   LIVE.add('famConnect');
 }
