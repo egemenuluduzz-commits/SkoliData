@@ -1847,7 +1847,7 @@ if (SRV.on) {
     if (!confirm(`${sc.name || sc.code} kablosuz güncelleme moduna alınsın mı?\n\nButon ölçüm kaydetmeyi bırakır ve yeni yazılımı bekler. Hafızadaki ölçümler silinmez.\n\nGüncellemeyi hemen yap: telefondaki DFU güncelleme uygulamasıyla (yazılım paketindeki README'de yazıyor) "DFU" geçen cihaza bağlan ve .zip güncelleme dosyasını seç. Güncelleme yapmazsan pili çıkarıp takınca buton eski yazılımla normal çalışmaya döner.`)) return;
     const r = await ownerService('u' + pin);
     B.connected = false; B.info = null; B.live = null;
-    if (r === 'U ok') alert('Buton güncelleme modunda.\n\n1) Telefondaki DFU güncelleme uygulamasını aç (README'de yazıyor).\n2) Listede "DFU" geçen cihaza bağlan.\n3) DFU / Update deyip SkoliData_v0.7_wireless_update.zip (ya da yeni) dosyasını seç.\n4) Bitince buton kendiliğinden yeniden başlar; buraya dönüp "Butona bağlan" ile yazılım sürümünü kontrol et.\n\nVazgeçersen: pili çıkarıp tak.');
+    if (r === 'U ok') alert('Buton güncelleme modunda.\n\n1) Telefondaki DFU güncelleme uygulamasını aç (yazılım paketindeki README dosyasında yazıyor).\n2) Listede "DFU" geçen cihaza bağlan.\n3) DFU / Update deyip SkoliData_v0.7_wireless_update.zip (ya da yeni) dosyasını seç.\n4) Bitince buton kendiliğinden yeniden başlar; buraya dönüp "Butona bağlan" ile yazılım sürümünü kontrol et.\n\nVazgeçersen: pili çıkarıp tak.');
     else { bleDisconnect(); toast(svcErr(r)); }
   };
   ACTIONS.ownerReadButton = async () => { const ok = await bleConnect({ infoOnly: true }); if (ok && B.info) { render(); toast('Buton: ' + B.info.code); } };
