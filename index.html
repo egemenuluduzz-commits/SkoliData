@@ -88,7 +88,7 @@ svg.chart{width:100%;height:auto;display:block}
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.4 · algo v1';
+const APP_VERSION = 'app v1.5 · algo v1';
 const SK_SVC = '508d0001-ade4-4fb4-9f46-45ea6a7e9c8f', SK_RX = '508d0002-ade4-4fb4-9f46-45ea6a7e9c8f', SK_TX = '508d0003-ade4-4fb4-9f46-45ea6a7e9c8f';   // SkoliData's own Bluetooth service
 // Clinician accounts: only a salted SHA-256 of the password is stored here (never the password itself).
 // NOTE: this is a front door for testing, not real security; real accounts need the server (master plan §6-7).
@@ -230,7 +230,10 @@ async function bleConnect(opts = {}) {
       refresh();
     }); }
     const server = await B.device.gatt.connect();
-    const svc = await server.getPrimaryService(SK_SVC);
+    let svc;
+    try { svc = await server.getPrimaryService(SK_SVC); }
+    catch (e) { try { dev.gatt.disconnect(); } catch (_) {} B.connected = false; refresh();
+      alert('Bu butonda eski buton yazılımı var. Güncel yazılımı (v0.6) yükle, sonra tekrar bağlan.'); return false; }
     const tx = await svc.getCharacteristic(SK_TX);
     B.rx = await svc.getCharacteristic(SK_RX);
     if (B.tx && B.onNotify) { try { B.tx.removeEventListener('characteristicvaluechanged', B.onNotify); } catch (e) {} }
@@ -1369,6 +1372,16 @@ if (SRV.on) {
     <section class="card list"><div class="li"><span class="k">Onay bekleyen klinisyenler</span><span class="v">${pending.length}</span></div>
       ${pending.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${esc(c.email)} · ${esc(c.city || '')}</span></span><span style="display:flex;gap:4px"><button class="btn text" data-act="ownerApprove" data-arg="${c.id}">Onayla</button><button class="btn text" data-act="ownerReject" data-arg="${c.id}">Reddet</button></span></div>`).join('') || '<p class="small">Bekleyen yok.</p>'}
     </section>
+    <section class="card"><b>Buton ekle / kontrol et</b><p class="small" style="margin:4px 0 8px">Yeni bir butonu sisteme ekle ya da elindeki butonun kimde olduğunu, yazılımını ve pilini gör. Butonun yanında ol.</p>
+      <button class="btn primary" data-act="ownerScan">Butona bağlan</button>
+      ${o.scan ? `<div class="list" style="margin-top:8px">
+        <div class="li"><span class="k">Buton</span><span class="v">${esc(o.scan.code)}</span></div>
+        <div class="li"><span class="k">Durum</span><span class="v">${o.scan.family ? 'Ailede: ' + esc(o.scan.family) : 'boşta – bir aile bu butonla hesap oluşturabilir'}</span></div>
+        <div class="li"><span class="k">Yazılım</span><span class="v">${esc(o.scan.fw || '–')}</span></div>
+        <div class="li"><span class="k">Pil</span><span class="v">${o.scan.mv ? (o.scan.mv / 1000).toFixed(2) + ' V' + (o.scan.mv < 2750 ? ' (az)' : '') : '–'}</span></div>
+        <div class="li"><span class="k">Hafıza</span><span class="v">${o.scan.flash === 1 ? 'çalışıyor' : 'sorun var'}</span></div>
+      </div>` : ''}
+    </section>
     <section class="card list"><div class="li"><span class="k">Aileler ve butonları</span><span class="v">${o.families.length}</span></div>
       ${o.families.map(famRow).join('') || '<p class="small">Henüz aile yok.</p>'}
       <p class="small">Bir aileye dokun: saatlerini gör, butonunu değiştir ya da ayır.</p>
@@ -1439,6 +1452,18 @@ if (SRV.on) {
   ACTIONS.ownerApprove = async id => { try { const code = await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: true }); toast('Onaylandı: ' + code); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerReject = async id => { if (!confirm('Bu klinisyen onaylanmayacak. Emin misin?')) return; try { await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: false }); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerOpenFam = id => go('ownerFam', { id });
+  ACTIONS.ownerScan = async () => {
+    const ok = await bleConnect({ infoOnly: true });
+    if (!ok || !B.info) return;
+    const i = B.info;
+    bleDisconnect(); B.info = null; B.live = null;
+    try {
+      const family = await SRV.rpc('owner_register_button', { p_code: i.code, p_fw: i.fw || null, p_mv: i.mv || null });
+      SRV.owner.scan = { code: i.code, fw: i.fw, mv: i.mv, flash: i.flash, family };
+      await SRV.loadOwner();
+      render(); toast(family ? `${i.code} şu ailede: ${family}` : `${i.code} eklendi (boşta).`);
+    } catch (e) { toast(trErr(e)); }
+  };
   ACTIONS.ownerReadButton = async () => { const ok = await bleConnect({ infoOnly: true }); if (ok && B.info) { render(); toast('Buton: ' + B.info.code); } };
   ACTIONS.ownerHours = async () => {
     try { const rows = await SRV.rpc('owner_family_overview', { p_family: params.id }); go('ownerFam', { id: params.id, hours: rows }); SRV.loadOwner().catch(() => {}); }
