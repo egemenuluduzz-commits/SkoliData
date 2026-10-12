@@ -17,6 +17,18 @@
  *   When room and skin are too close to tell apart, time is marked "not sure" and not counted.
  *
  * Works in the browser (window.SkoliAlgo) and in Node (require).
+ *
+ * THE CONTRACT WITH THE APP (keep it when the algorithm is replaced; the calibration pages only use this):
+ *   INFO                     { id, name, summary }            which algorithm, in plain words
+ *   PROTOCOL                 [{ key, seconds, title, text, before? }]  the guided measured calibration
+ *   calibrate(buffers, opts) buffers = { <protocol key>: samples } -> { ok, code, reason, model, details }
+ *   classify(samples, model) -> { states: [{ t, state: 'on'|'off', unsure, gapAfter }], segments, wornMs, ... }
+ *   params(model)            editable settings: [{ key, label, unit, value, min, max, step, help, group }]
+ *   applyParams(model, vals) -> { model, errors: [text], warnings: [text] }   (vals in the same units as params)
+ *   overlays(model)          lines for charts: [{ value, label, kind: 'on'|'off'|'ref' }]
+ *   facts(model)             read-only numbers: [{ label, value }]
+ *   accepts(model)           true when a stored model was made by this algorithm
+ *   defaultModel()           used before any calibration
  */
 (function (root) {
   'use strict';
@@ -39,6 +51,17 @@
     hotterThanSkinC: 0.6,      // readings this much above the calibrated skin level can't be judged -> not sure
     maxLagS: 600,
   };
+
+  const INFO = { id: 'v1', name: 'Eşik + ısınma eğrisi (v1)',
+    summary: 'Korse takılınca buton tene doğru ısınır, çıkarılınca odaya doğru soğur. Sıcaklık "takılı eşiği"nin üstüne çıkınca korse takıldı, "çıkarıldı eşiği"nin altına inince çıkarıldı sayılır; arada kalan bant titremeyi önler. Oda sıcaklığı gün içinde yavaşça yeniden öğrenilir. Isınma/soğuma gecikmesi kadar geriye düzeltilir. Oda ile ten çok yakınsa ya da ölçüm tenden sıcaksa (kalorifer, güneş, araba) süre "emin değil" sayılır.' };
+  const PROTOCOL = [
+    { key: 'off', seconds: 300, title: 'Korseyi çıkar', list: 'Korse çıkarılmış',
+      text: 'Korseyi çıkar ve tenine değmeyecek şekilde açık bir yere koy. Butonu elleme.' },
+    { key: 'on', seconds: 300, title: 'Korse takılı', list: 'Korse takılı', text: 'Normal otur ve korseyi oynatma.',
+      before: { title: 'Şimdi korseyi tak', text: 'Korseyi her zamanki gibi tak. Taktıktan sonra aşağıdaki düğmeye bas ve 5 dakika normal otur.', button: 'Taktım, başlat' } },
+  ];
+  // a model may carry its own settings (changed by hand on the calibration page); otherwise the defaults
+  const P = (model, k) => (model && model[k] !== undefined && model[k] !== null && isFinite(model[k])) ? model[k] : CFG[k];
 
   // ---------- small helpers ----------
   const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
@@ -91,6 +114,7 @@
    * Returns { ok, reason, model } ; reason is a short code + Turkish text for the screen.
    */
   function calibrate(offSamples, onSamples, opts = {}) {
+    if (offSamples && !Array.isArray(offSamples)) { opts = onSamples || {}; onSamples = offSamples.on || []; offSamples = offSamples.off || []; }   // calibrate({off, on}, opts)
     const phaseS = opts.phaseSeconds || 300, everyS = opts.everyS || 2;
     const off = cleanPhase(offSamples, phaseS, everyS), on = cleanPhase(onSamples, phaseS, everyS);
     const fail = (code, tr, extra) => ({ ok: false, code, reason: tr, details: extra || {} });
@@ -115,8 +139,8 @@
     const tauOff = fOff.tauKnown ? clamp(fOff.tau, 10, 900) : tauOn * 1.5;
     const lastRh = (arr) => { const r = arr.ok.slice(-60).map(s => s.rh).filter(v => v !== null && isFinite(v)); return r.length ? mean(r) : null; };
     const model = {
-      version: 1, createdAt: opts.now || Date.now(),
-      Toff, Ton, gap,
+      version: 1, algo: INFO.id, kind: 'measured', createdAt: opts.now || Date.now(),
+      Toff, Ton, gap, onFrac: CFG.onFrac, offFrac: CFG.offFrac,
       thrOn: Toff + CFG.onFrac * gap, thrOff: Toff + CFG.offFrac * gap,
       tauOn, tauOff,
       lagOn: Math.min(CFG.maxLagS, tauOn * Math.log(1 / (1 - CFG.onFrac))),   // time from putting on to crossing thrOn
@@ -138,6 +162,7 @@
     if (!n) return { states: [], segments: [], wornMs: 0, unsureMs: 0, offMs: 0, nodataMs: 0 };
 
     // 1) spike filter: running median of 5
+    const onFrac = P(model, 'onFrac'), offFrac = P(model, 'offFrac'), unsureGapC = P(model, 'unsureGapC'), minSegS = P(model, 'minSegS'), hotC = P(model, 'hotterThanSkinC');
     const sm = s.map((_, i) => median(s.slice(Math.max(0, i - (CFG.smoothN >> 1)), Math.min(n, i + (CFG.smoothN >> 1) + 1)).map(x => x.skin)));
 
     // 2) state machine with a slowly re-learned OFF level
@@ -152,9 +177,9 @@
       const T = sm[i], t = s[i].t;
       const dtS = i ? (t - s[i - 1].t) / 1000 : 0;
       const newBlock = i > 0 && dtS > CFG.dataGapS;
-      if (newBlock) { state = T >= base + CFG.onFrac * gapNow() ? 'on' : 'off'; resetWin(t, T); }
+      if (newBlock) { state = T >= base + onFrac * gapNow() ? 'on' : 'off'; resetWin(t, T); }
       const g = Math.max(gapNow(), 0.01);
-      const thrOn = base + CFG.onFrac * g, thrOff = base + CFG.offFrac * g;
+      const thrOn = base + onFrac * g, thrOff = base + offFrac * g;
       if (state === 'off') {
         if (T >= thrOn) { state = 'on'; resetWin(t, T); flips.push({ i, to: 'on' }); }
         else if (T < base) base = Math.max(T, model.Toff - 8);   // cooling: the room is at most this warm
@@ -173,7 +198,7 @@
           base = Math.min(base > T ? base : T, model.Ton - 1.0);   // room is at most the current reading
         }
       }
-      out[i] = { t, T, state, unsure: gapNow() < CFG.unsureGapC || T > model.Ton + CFG.hotterThanSkinC, gapAfter: i < n - 1 ? (s[i + 1].t - t) / 1000 > CFG.dataGapS : false };
+      out[i] = { t, T, state, unsure: gapNow() < unsureGapC || T > model.Ton + hotC, gapAfter: i < n - 1 ? (s[i + 1].t - t) / 1000 > CFG.dataGapS : false };
     }
 
     // 3) back-date each flip by the sensor delay (the real moment was earlier than the crossing)
@@ -218,7 +243,7 @@
       for (let k = 1; k < segs.length - 1; k++) {
         const a = segs[k - 1], b = segs[k], c = segs[k + 1];
         const joined = !out[a.end].gapAfter && !out[b.end].gapAfter;
-        if (joined && a.state === c.state && b.state !== a.state && segDur(b) < CFG.minSegS) {
+        if (joined && a.state === c.state && b.state !== a.state && segDur(b) < minSegS) {
           for (let i = b.start; i <= b.end; i++) out[i].state = a.state;
           a.end = c.end; segs.splice(k, 2); changed = true; break;
         }
@@ -256,7 +281,79 @@
     return days;   // ms per day
   }
 
-  const api = { CFG, fitCurve, calibrate, classify, hoursPerDay };
+  // ---------- the calibration page contract ----------
+  const r2 = x => Math.round(x * 100) / 100;
+  function thresholds(m) { const g = m.Ton - m.Toff; return { on: m.Toff + P(m, 'onFrac') * g, off: m.Toff + P(m, 'offFrac') * g }; }
+  function params(m) {
+    const th = thresholds(m);
+    return [
+      { key: 'thrOn', label: 'Takılı eşiği', unit: '°C', value: r2(th.on), min: 15, max: 40, step: 0.1, group: 'Eşikler',
+        help: 'Sıcaklık bunun üstüne çıkınca korse takıldı sayılır. Düşürürsen takma daha erken/kolay algılanır.' },
+      { key: 'thrOff', label: 'Çıkarıldı eşiği', unit: '°C', value: r2(th.off), min: 15, max: 40, step: 0.1, group: 'Eşikler',
+        help: 'Sıcaklık bunun altına inince korse çıkarıldı sayılır. Takılı eşiğinden düşük olmalı.' },
+      { key: 'Toff', label: 'Oda seviyesi', unit: '°C', value: r2(m.Toff), min: 0, max: 36, step: 0.1, group: 'Kalibrasyon ölçümü',
+        help: 'Korse çıkarılmışken butonun yerleştiği sıcaklık. Gün içinde yeniden öğrenilir; bu başlangıç değeridir.' },
+      { key: 'Ton', label: 'Takılı seviye (ten)', unit: '°C', value: r2(m.Ton), min: 20, max: 40, step: 0.1, group: 'Kalibrasyon ölçümü',
+        help: 'Korse takılıyken butonun yerleştiği sıcaklık.' },
+      { key: 'tauOn', label: 'Isınma gecikmesi (τ)', unit: 's', value: Math.round(m.tauOn), min: 10, max: 900, step: 5, group: 'Kalibrasyon ölçümü',
+        help: 'Butonun tene ısınma hızı. Takma anı bu süreye göre geriye düzeltilir.' },
+      { key: 'tauOff', label: 'Soğuma gecikmesi (τ)', unit: 's', value: Math.round(m.tauOff), min: 10, max: 900, step: 5, group: 'Kalibrasyon ölçümü',
+        help: 'Butonun odaya soğuma hızı. Çıkarma anı bu süreye göre geriye düzeltilir.' },
+      { key: 'unsureGapC', label: 'Ayırt edilemez fark', unit: '°C', value: P(m, 'unsureGapC'), min: 0.5, max: 8, step: 0.1, group: 'Gelişmiş',
+        help: 'Oda ile ten arasındaki fark bundan küçükse (çok sıcak oda) süre "emin değil" sayılır, takılı sayılmaz.' },
+      { key: 'hotterThanSkinC', label: 'Tenden sıcak payı', unit: '°C', value: P(m, 'hotterThanSkinC'), min: 0, max: 5, step: 0.1, group: 'Gelişmiş',
+        help: 'Ölçüm takılı seviyenin bu kadar üstündeyse (kalorifer, güneş, sıcak araba) süre "emin değil" sayılır.' },
+      { key: 'minSegMin', label: 'En kısa takma / çıkarma', unit: 'dk', value: r2(P(m, 'minSegS') / 60), min: 0, max: 30, step: 0.5, group: 'Gelişmiş',
+        help: 'Bundan kısa takma ya da çıkarmalar yok sayılır (titreşim ve kısa dokunmalar).' },
+    ];
+  }
+  function applyParams(m, v) {
+    const th0 = thresholds(m), exact = { thrOn: th0.on, thrOff: th0.off, Toff: m.Toff, Ton: m.Ton, tauOn: m.tauOn, tauOff: m.tauOff,
+      unsureGapC: P(m, 'unsureGapC'), hotterThanSkinC: P(m, 'hotterThanSkinC'), minSegMin: P(m, 'minSegS') / 60 };
+    const shown = Object.fromEntries(params(m).map(p => [p.key, p.value]));
+    const errors = [], warnings = [], num = k => (+v[k] === shown[k] && exact[k] !== undefined) ? exact[k] : +v[k];   // untouched fields keep their exact value
+    const Toff = num('Toff'), Ton = num('Ton'), on = num('thrOn'), off = num('thrOff');
+    for (const p of params(m)) { const x = num(p.key); if (!isFinite(x)) errors.push(p.label + ': sayı gir.'); else if (x < p.min || x > p.max) errors.push(`${p.label}: ${p.min}–${p.max} ${p.unit} arası olmalı.`); }
+    if (!errors.length) {
+      if (Ton - Toff < 1) errors.push('Takılı seviye, oda seviyesinden en az 1 °C yüksek olmalı.');
+      if (off >= on) errors.push('Çıkarıldı eşiği, takılı eşiğinden düşük olmalı.');
+      if (on - off < 0.3) warnings.push('Eşikler birbirine çok yakın: takılı/çıkarıldı sık sık değişebilir.');
+      if (on > Ton) warnings.push('Takılı eşiği ten seviyesinden yüksek: korse takılıyken bile takılı sayılmayabilir.');
+      if (off < Toff) warnings.push('Çıkarıldı eşiği oda seviyesinden düşük: korse çıkarılınca geç ya da hiç algılanmayabilir.');
+    }
+    if (errors.length) return { model: null, errors, warnings };
+    const gap = Ton - Toff, onFrac = (on - Toff) / gap, offFrac = (off - Toff) / gap;
+    const tauOn = num('tauOn'), tauOff = num('tauOff');
+    const model = Object.assign({}, m, {
+      algo: INFO.id, kind: 'manual', basedOn: m.createdAt || 0, createdAt: Date.now(),
+      Toff, Ton, gap, onFrac, offFrac, thrOn: on, thrOff: off, tauOn, tauOff,
+      lagOn: Math.min(CFG.maxLagS, tauOn * Math.log(1 / Math.max(0.01, 1 - Math.min(0.99, onFrac)))),
+      lagOff: Math.min(CFG.maxLagS, tauOff * Math.log(1 / Math.max(0.01, offFrac))),
+      unsureGapC: num('unsureGapC'), hotterThanSkinC: num('hotterThanSkinC'), minSegS: num('minSegMin') * 60,
+    });
+    delete model.isDefault;
+    return { model, errors, warnings };
+  }
+  function overlays(m) {
+    const th = thresholds(m);
+    return [{ value: th.on, label: 'takılı eşiği', kind: 'on' }, { value: th.off, label: 'çıkarıldı eşiği', kind: 'off' },
+            { value: m.Ton, label: 'ten', kind: 'ref' }, { value: m.Toff, label: 'oda', kind: 'ref' }];
+  }
+  function facts(m) {
+    const th = thresholds(m), out = [
+      { label: 'Oda / ten', value: `${m.Toff.toFixed(2)} / ${m.Ton.toFixed(2)} °C` },
+      { label: 'Fark', value: `${(m.Ton - m.Toff).toFixed(2)} °C` },
+      { label: 'Eşikler', value: `≥ ${th.on.toFixed(2)} takılı · ≤ ${th.off.toFixed(2)} çıkarıldı` },
+      { label: 'Gecikme τ', value: `ısınma ${Math.round(m.tauOn)} s · soğuma ${Math.round(m.tauOff)} s` },
+    ];
+    if (m.noise !== undefined) out.push({ label: 'Gürültü', value: `${(+m.noise).toFixed(2)} °C` });
+    return out;
+  }
+  const accepts = m => !!m && (m.algo || 'v1') === INFO.id && isFinite(m.Toff) && isFinite(m.Ton);
+  const defaultModel = () => ({ version: 1, algo: INFO.id, kind: 'default', createdAt: 0, isDefault: true, Toff: 24, Ton: 33.5, gap: 9.5,
+    onFrac: CFG.onFrac, offFrac: CFG.offFrac, thrOn: 29.7, thrOff: 27.8, tauOn: 100, tauOff: 150, lagOn: 92, lagOff: 137 });
+
+  const api = { INFO, PROTOCOL, CFG, fitCurve, calibrate, classify, hoursPerDay, params, applyParams, overlays, facts, accepts, defaultModel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SkoliAlgo = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -77,6 +77,13 @@ main a:not(.li){color:#1E5EFF;text-decoration:none;font-weight:600}
 .gauge{display:flex;gap:4px}.gauge i{flex:1;height:10px;border-radius:5px;background:var(--line)}.gauge i.on{background:var(--blue)}
 pre.log{white-space:pre-wrap;word-break:break-all;font-size:11px;line-height:1.4;margin:8px 0 0;max-height:200px;overflow:auto;background:var(--ground);border-radius:12px;padding:10px}
 svg.chart{width:100%;height:auto;display:block}
+button.chip{border:1px solid #D3E2FD;cursor:pointer;min-height:32px;font:inherit;font-size:13px;font-weight:700}
+button.chip.on{background:var(--deep);color:#fff;border-color:var(--deep)}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.legend{font-size:12px;color:var(--slate);margin-top:6px;line-height:1.5}
+.help{font-size:12.5px;color:var(--slate);margin:4px 0 0;line-height:1.4}
+table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}table.cmp td,table.cmp th{padding:6px 4px;border-bottom:1px solid #EEF2F9;text-align:right}table.cmp td:first-child,table.cmp th:first-child{text-align:left}
+.warn{background:#FFF;border:1px solid #D3E2FD;border-left:4px solid var(--deep);border-radius:12px;padding:10px 12px;font-size:14px;margin-top:8px}
 .timer{font-size:56px;font-weight:800;letter-spacing:-.03em;text-align:center;font-variant-numeric:tabular-nums}
 .steps{display:flex;gap:8px;justify-content:center}.steps i{width:28px;height:6px;border-radius:3px;background:var(--line)}.steps i.on{background:var(--blue)}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 20px);transform:translateX(-50%);background:var(--navy);color:#fff;padding:12px 18px;border-radius:14px;font-weight:700;font-size:15px;max-width:90vw;z-index:9}
@@ -90,7 +97,7 @@ svg.chart{width:100%;height:auto;display:block}
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.8 · algo v1';
+const APP_VERSION = 'app v1.9 · algo ' + SkoliAlgo.INFO.id;
 // name + surname of the person who wears the brace (so the team can tell families apart)
 const nameOk = n => (n || '').trim().split(/\s+/).filter(w => w.length >= 2).length >= 2;
 const NAME_MSG = 'Ad ve soyadı yaz (örnek: Elif Yılmaz).';
@@ -102,7 +109,7 @@ const SK_SVC = '508d0001-ade4-4fb4-9f46-45ea6a7e9c8f', SK_RX = '508d0002-ade4-4f
 // Clinician accounts: only a salted SHA-256 of the password is stored here (never the password itself).
 // NOTE: this is a front door for testing, not real security; real accounts need the server (master plan §6-7).
 const CLINICIANS = [{ u: 'klinisyen', salt: '5421f45dc65f8046e7b1231c5b5fc80f', hash: 'e4a095d63996a4ced0aa39f2d3f0633b469adc340db00dc81c4b7dc6f3d909c1', name: 'Klinisyen' }];
-const DEFAULT_MODEL = { version: 1, createdAt: 0, isDefault: true, Toff: 24, Ton: 33.5, gap: 9.5, thrOn: 29.7, thrOff: 27.8, tauOn: 100, tauOff: 150, lagOn: 92, lagOff: 137 };
+const DEFAULT_MODEL = SkoliAlgo.defaultModel();
 const DAYS_TR = ['Pz', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'];
 const MONTHS_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 const WEEKDAYS_TR = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
@@ -139,7 +146,7 @@ const saveProfiles = p => lsSet('sk.profiles', p);
 const getMeta = code => lsGet('sk.meta.' + code, { next: 0, lastSync: 0, mv: 0, firstSeen: Date.now() });
 const setMeta = (code, m) => lsSet('sk.meta.' + code, m);
 const getModel = code => lsGet('sk.model.' + code, null);
-const modelFor = code => getModel(code) || DEFAULT_MODEL;
+const modelFor = code => { const m = getModel(code); return m && SkoliAlgo.accepts(m) ? m : DEFAULT_MODEL; };   // a model from another algorithm version is not used
 
 let DB = null, memRecs = null;
 function idb() {
@@ -196,17 +203,20 @@ function unpackDay(json, code) {
 async function encodeDay(recs) { const json = packDay(recs); return canGz ? { enc: 'gz64', data: b64enc(await gzipBytes(new TextEncoder().encode(json))) } : { enc: 'json', data: json }; }
 async function decodeRawRow(row, code) { return unpackDay(row.enc === 'json' ? row.data : new TextDecoder().decode(await gzipBytes(b64dec(row.data), true)), code); }
 // readings for a time window: this device's own, filled in from the server where this device has none
-async function getRecsAny(code, t0, t1) {
+const RAWCACHE = {};
+async function getRecsAny(code, t0, t1, fidIn) {
   const local = await getRecs(code, t0, t1);
   if (!window.SRV_ON || !SRV.user || !SRV.profile) return local;
-  const P = profiles()[code] || {}, fid = SRV.profile.role === 'family' ? SRV.user.id : P.familyId;
+  const P = profiles()[code] || {}, fid = SRV.profile.role === 'family' ? SRV.user.id : (fidIn || P.familyId);
   if (!fid) return local;
   try {
-    const rows = SRV.profile.role === 'owner'
+    const ck = [fid, dateKey(t0), dateKey(t1)].join('|'), hit = RAWCACHE[ck];
+    const rows = hit && Date.now() - hit.at < 300e3 ? hit.rows : (SRV.profile.role === 'owner'
       ? await SRV.rpc('owner_raw_days', { p_family: fid, p_from: dateKey(t0), p_to: dateKey(t1) })
-      : await sv(SRV.sb.from('raw_days').select('*').eq('family_id', fid).gte('day', dateKey(t0)).lte('day', dateKey(t1)));
+      : await sv(SRV.sb.from('raw_days').select('*').eq('family_id', fid).gte('day', dateKey(t0)).lte('day', dateKey(t1))));
+    if (!hit || hit.rows !== rows) RAWCACHE[ck] = { at: Date.now(), rows };
     const have = new Set(local.map(r => Math.round(r.t / 1000))), extra = [];
-    for (const row of rows) for (const r of await decodeRawRow(row, code)) if (r.t >= t0 && r.t <= t1 && !have.has(Math.round(r.t / 1000))) extra.push(r);
+    for (const row of rows) if (!row.button_code || row.button_code === code) for (const r of await decodeRawRow(row, code)) if (r.t >= t0 && r.t <= t1 && !have.has(Math.round(r.t / 1000))) extra.push(r);
     return extra.length ? local.concat(extra).sort((a, b) => a.t - b.t) : local;
   } catch (e) { blog('sunucu ham veri: ' + (e.message || e)); return local; }
 }
@@ -235,7 +245,7 @@ async function bleConnect(opts = {}) {
     if (!dev.__skDisc) { dev.__skDisc = true; dev.addEventListener('gattserverdisconnected', () => {
       if (dev !== B.device) return;            // an older button we already left
       B.connected = false; B.syncing = false; blog('bağlantı koptu');
-      if (CAL.phase === 'off' || CAL.phase === 'on') calFail('Bağlantı koptu. Telefonu butona yakın tut ve tekrar dene.');
+      if (calRunning()) calFail('Bağlantı koptu. Telefonu butona yakın tut ve tekrar dene.');
       refresh();
     }); }
     const server = await B.device.gatt.connect();
@@ -311,10 +321,10 @@ function handleLine(line) {
   if (line.startsWith('L,') && B.info && !B.info.old) {
     const p = line.split(',');
     const r = { code: B.info.code, idx: +p[1], t: wallTime(+p[2]), skin: p[3] === 'ERR' ? null : +p[3], rh: p[4] === 'ERR' ? null : +p[4], chip: +p[5] };
-    B.live = r;
+    B.live = r; noteLive(r);
     putRecs([r]);
     const m = getMeta(r.code); if (m.next === r.idx) { m.next = r.idx + 1; m.boot = { idx: B.info.boot, wall: B.info.at - B.info.up * 1000, lastT: +p[2] }; setMeta(r.code, m); }
-    if (CAL.phase === 'off' || CAL.phase === 'on') CAL.buf[CAL.phase].push(r);
+    if (calRunning()) (CAL.buf[CAL.key] || (CAL.buf[CAL.key] = [])).push(r);
     refresh();
   }
 }
@@ -427,7 +437,7 @@ let session = ssGet('sk.session');   // {role:'family', code} | {role:'clinician
 let screen = 'login', params = {};
 const LIVE = new Set(['famHome', 'calib', 'clinPatient', 'raw', 'famSettings', 'famWeek', 'clinList', 'famConnect', 'famNewButton']);
 function go(s, p = {}) { screen = s; params = p; render(); window.scrollTo(0, 0); }
-function refresh() { if (LIVE.has(screen) && !(document.activeElement && document.activeElement.tagName === 'INPUT')) render(); }
+function refresh() { if (LIVE.has(screen) && !(document.activeElement && document.activeElement.tagName === 'INPUT')) render(); else updateLive(); }
 const NEEDS_BUTTON = new Set(['famHome', 'famWeek', 'famSettings']);
 const familyNeedsButton = () => !!(session && session.role === 'family' && (!session.code || (profiles()[session.code] || {}).released));
 function render() { if (NEEDS_BUTTON.has(screen) && familyNeedsButton()) screen = 'famNewButton'; const f = SCREENS[screen] || SCREENS.login; $('#app').innerHTML = f(params); if (f.after) f.after(params); }
@@ -507,66 +517,73 @@ SCREENS.famLogin = () => {
 </main>`;
 };
 
-// ---------- calibration (family + clinician) ----------
-const CAL = { phase: null, code: null, start: 0, buf: { off: [], on: [] }, result: null, timer: null, by: 'family' };
-const CAL_S = 300;
+// ---------- calibration (family, clinician, owner) — the steps come from the algorithm (SkoliAlgo.PROTOCOL) ----------
+const CAL = { phase: null, step: 0, key: null, code: null, fid: null, start: 0, buf: {}, result: null, timer: null, by: 'family' };
+const PROTO = () => SkoliAlgo.PROTOCOL;
+const calRunning = () => CAL.phase === 'run';
+const calStaff = () => CAL.by !== 'family';
 SCREENS.calib = () => {
-  const clin = CAL.by === 'clinician', back = clin ? 'clinPatient' : 'famHome';
-  const live = clin && B.live ? `<p class="small center">Canlı: ${B.live.skin ?? 'ERR'} °C · nem %${B.live.rh ?? '–'}</p>` : '';
+  const staff = calStaff(), top = staff ? backTo('Kalibrasyon') : backBtn('famHome');
+  const doneAct = staff ? 'data-act="goBack"' : 'data-act="go" data-arg="famHome"';
+  const live = staff && B.live ? `<p class="small center">Canlı: ${B.live.skin ?? 'ERR'} °C · nem %${B.live.rh ?? '–'}</p>` : '';
   const conn = B.connected ? '' : `<div class="note"><b>Buton bağlı değil</b>Kalibrasyon için telefon butona bağlı kalmalı.</div><button class="btn primary" data-act="connect">Butona bağlan</button>`;
+  const steps = PROTO(), cur = steps[CAL.step] || steps[0], total = steps.reduce((x, y) => x + y.seconds, 0);
   const ring = (frac, label) => `<div class="ringwrap" role="img" aria-label="${label}"><svg viewBox="0 0 220 220" aria-hidden="true"><circle cx="110" cy="110" r="100" fill="none" stroke="#E8F1FF" stroke-width="16"/><circle cx="110" cy="110" r="100" fill="none" stroke="#1E5EFF" stroke-width="16" stroke-linecap="round" stroke-dasharray="${(628.3 * frac).toFixed(1)} 628.3"/></svg><div class="ringtxt"><div class="timer">${label}</div></div></div>`;
-  const left = () => { const s = Math.max(0, CAL_S - Math.floor((Date.now() - CAL.start) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-  const frac = () => Math.min(1, (Date.now() - CAL.start) / (CAL_S * 1000));
-  if (!CAL.phase) return `<main>${backBtn(back)}
+  const left = () => { const x = Math.max(0, cur.seconds - Math.floor((Date.now() - CAL.start) / 1000)); return `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`; };
+  const frac = () => Math.min(1, (Date.now() - CAL.start) / (cur.seconds * 1000));
+  const dots = `<div class="steps">${steps.map((_, i) => `<i class="${i <= CAL.step ? 'on' : ''}"></i>`).join('')}</div>`;
+  if (!CAL.phase) return `<main>${top}
     <h1>Kalibrasyon</h1>
-    <p class="sub">Buton, korsenin takılı ve çıkarılmış halini öğrenir. Toplam 10 dakika sürer.</p>
-    <section class="card list">
-      <div class="li"><span class="k">1. Korse çıkarılmış</span><span class="v">5 dk</span></div>
-      <div class="li"><span class="k">2. Korse takılı</span><span class="v">5 dk</span></div>
-    </section>
+    <p class="sub">Buton, korsenin takılı ve çıkarılmış halini öğrenir. Toplam ${Math.round(total / 60)} dakika sürer.</p>
+    <section class="card list">${steps.map((x, i) => `<div class="li"><span class="k">${i + 1}. ${esc(x.list || x.title)}</span><span class="v">${Math.round(x.seconds / 60)} dk</span></div>`).join('')}</section>
     <div class="note"><b>Önemli</b>Normal oda sıcaklığında yap (sıcak araba, güneş ya da kalorifer yanında değil). Telefon butonun yakınında kalsın.</div>
     <div style="flex:1"></div>${conn}
     <button class="btn primary" data-act="calStart" ${B.connected ? '' : 'disabled'}>Başla</button></main>`;
-  if (CAL.phase === 'off') return `<main><div class="steps"><i class="on"></i><i></i></div>
-    <h1>Korseyi çıkar</h1><p class="sub">Korseyi çıkar ve tenine değmeyecek şekilde açık bir yere koy. Butonu elleme.</p>
-    ${ring(frac(), left())}${live}<div style="flex:1"></div>
+  if (CAL.phase === 'wait') return `<main>${dots}
+    <h1>${esc(cur.before.title)}</h1><p class="sub">${esc(cur.before.text)}</p>
+    <div style="flex:1"></div>${conn}<button class="btn primary" data-act="calStepStart" ${B.connected ? '' : 'disabled'}>${esc(cur.before.button || 'Başlat')}</button>
     <button class="btn secondary" data-act="calCancel">Vazgeç</button></main>`;
-  if (CAL.phase === 'wait') return `<main><div class="steps"><i class="on"></i><i class="on"></i></div>
-    <h1>Şimdi korseyi tak</h1><p class="sub">Korseyi her zamanki gibi tak. Taktıktan sonra aşağıdaki düğmeye bas ve 5 dakika normal otur.</p>
-    <div style="flex:1"></div>${conn}<button class="btn primary" data-act="calOnStart" ${B.connected ? '' : 'disabled'}>Taktım, başlat</button>
-    <button class="btn secondary" data-act="calCancel">Vazgeç</button></main>`;
-  if (CAL.phase === 'on') return `<main><div class="steps"><i class="on"></i><i class="on"></i></div>
-    <h1>Korse takılı</h1><p class="sub">Normal otur ve korseyi oynatma.</p>
+  if (CAL.phase === 'run') return `<main>${dots}
+    <h1>${esc(cur.title)}</h1><p class="sub">${esc(cur.text)}</p>
     ${ring(frac(), left())}${live}<div style="flex:1"></div>
     <button class="btn secondary" data-act="calCancel">Vazgeç</button></main>`;
   const r = CAL.result || {};
-  const det = clin && r.details ? `<section class="card small" style="text-align:left">Oda (çıkarılmış): <b>${r.details.Toff} °C</b> · Takılı: <b>${r.details.Ton} °C</b> · Fark: <b>${r.details.gap} °C</b><br>Isınma süresi τ: <b>${Math.round(r.details.tauOn || 0)} s</b> · Soğuma τ: <b>${Math.round(r.details.tauOff || 0)} s</b><br>Gürültü: ${(Math.max(r.details.rmsOn || 0, r.details.rmsOff || 0)).toFixed(2)} °C${r.ok ? `<br>Eşikler: takılı ≥ ${r.model.thrOn.toFixed(2)} °C, çıkarıldı ≤ ${r.model.thrOff.toFixed(2)} °C` : ''}</section>` : '';
+  const det = staff ? `<section class="card list" style="text-align:left">${r.ok ? SkoliAlgo.facts(r.model).map(f => `<div class="li"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join('')
+    : Object.entries(r.details || {}).filter(([, v]) => typeof v === 'number').map(([k, v]) => `<div class="li"><span class="k">${esc(k)}</span><span class="v">${(+v).toFixed(2)}</span></div>`).join('')}</section>` : '';
   return `<main><div style="flex:1"></div>
     <div class="mark" aria-hidden="true"><span></span></div>
     <h1 class="center">${r.ok ? 'Kalibrasyon tamamlandı' : 'Kalibrasyon başarısız'}</h1>
     <p class="sub center">${esc(r.ok ? 'Buton artık korsenin takılı olup olmadığını senin korsene göre anlıyor.' : (r.reason || '') + ' Lütfen tekrar dene.')}</p>
     ${det}<div style="flex:1"></div>
-    ${r.ok ? `<button class="btn primary" data-act="go" data-arg="${back}">Bitti</button>` : `<button class="btn primary" data-act="calReset">Tekrar dene</button><button class="btn secondary" data-act="go" data-arg="${back}">Sonra</button>`}
+    ${r.ok ? `<button class="btn primary" ${doneAct}>Bitti</button>` : `<button class="btn primary" data-act="calReset">Tekrar dene</button><button class="btn secondary" ${doneAct}>Sonra</button>`}
   </main>`;
 };
+function calBeginStep(i) {
+  const st = PROTO()[i]; CAL.step = i; CAL.key = st.key;
+  if (st.before) { CAL.phase = 'wait'; render(); return; }
+  CAL.phase = 'run'; CAL.start = Date.now(); CAL.buf[st.key] = []; calTick(); render();
+}
 function calTick() {
   clearTimeout(CAL.timer);
-  if (CAL.phase !== 'off' && CAL.phase !== 'on') return;
-  if (Date.now() - CAL.start >= CAL_S * 1000) {
-    if (CAL.phase === 'off') { CAL.phase = 'wait'; render(); return; }
+  if (!calRunning()) return;
+  const steps = PROTO(), cur = steps[CAL.step];
+  if (Date.now() - CAL.start >= cur.seconds * 1000) {
+    if (CAL.step + 1 < steps.length) { calBeginStep(CAL.step + 1); return; }
     CAL.phase = 'done';
-    const res = SkoliAlgo.calibrate(CAL.buf.off, CAL.buf.on, { phaseSeconds: CAL_S, everyS: (B.info && B.info.every) || 2 });
+    const res = SkoliAlgo.calibrate(CAL.buf, { phaseSeconds: steps[0].seconds, everyS: (B.info && B.info.every) || 2 });
     CAL.result = res;
-    const raw = { at: Date.now(), by: CAL.by, off: CAL.buf.off.map(r => [r.t, r.skin, r.rh]), on: CAL.buf.on.map(r => [r.t, r.skin, r.rh]), result: { ok: res.ok, code: res.code, details: res.details } };
+    const pack = a => (a || []).map(r => [r.t, r.skin, r.rh]);
+    const raw = { at: Date.now(), by: CAL.by, phases: Object.fromEntries(Object.keys(CAL.buf).map(k => [k, pack(CAL.buf[k])])), off: pack(CAL.buf.off), on: pack(CAL.buf.on), result: { ok: res.ok, code: res.code, details: res.details } };
     lsSet('sk.calraw.' + CAL.code, raw);
-    if (window.onCalibrated) window.onCalibrated(CAL.code, res, CAL.by).catch(e => toast('Kalibrasyon sunucuya kaydedilemedi.'));
+    if (window.onCalibrated) window.onCalibrated(CAL.code, res, CAL.by, CAL.fid).catch(e => toast('Kalibrasyon sunucuya kaydedilemedi.'));
     if (res.ok) {
       const model = Object.assign({}, res.model, { by: CAL.by });
       lsSet('sk.model.' + CAL.code, model);
-      const hist = lsGet('sk.calhist.' + CAL.code, []); hist.push({ at: model.createdAt, by: CAL.by, Toff: model.Toff, Ton: model.Ton, tauOn: model.tauOn }); lsSet('sk.calhist.' + CAL.code, hist.slice(-20));
+      const hist = lsGet('sk.calhist.' + CAL.code, []); hist.push({ at: model.createdAt, by: CAL.by, kind: 'measured', model }); lsSet('sk.calhist.' + CAL.code, hist.slice(-20));
       lsSet('sk.days.' + CAL.code, {});
       computeDays(CAL.code, 14, true).then(refresh);
     }
+    CALP.loaded = false;
     render(); return;
   }
   if (screen === 'calib') render();
@@ -582,7 +599,7 @@ function nowState(code) {
   if (!r || r.skin === null) return null;
   const today = DAYCACHE[code] && DAYCACHE[code][dateKey(Date.now())];
   const lastSeg = today && today.segs.length ? today.segs[today.segs.length - 1] : null;
-  if (r.skin > model.Ton + SkoliAlgo.CFG.hotterThanSkinC) return 'unsure';
+  if (r.skin > model.Ton + (model.hotterThanSkinC ?? SkoliAlgo.CFG.hotterThanSkinC)) return 'unsure';
   if (lastSeg && Date.now() - lastSeg[1] < 180e3) return 'on';
   return r.skin >= model.thrOn ? 'on' : 'off';
 }
@@ -757,42 +774,168 @@ SCREENS.clinPatient = p => {
     <div class="li"><span class="k">Son senkron</span><span class="v">${ago(meta.lastSync)}</span></div>
     <div class="li"><span class="k">Pil</span><span class="v">${esc(battery(code).txt)}</span></div>
   </section>
+  ${liveSection(code)}
   ${isLive ? '' : `<button class="btn secondary" data-act="clinConnect">Butona bağlan ve senkronize et</button>`}
-  <button class="btn primary" data-act="calOpen" data-arg="clinician" ${isLive ? '' : 'disabled'}>Kalibrasyon yap</button>
-  <button class="btn text" data-act="openRaw" data-arg="${esc(code)}" style="align-self:center">Ham veri (geliştirici)</button>
+  <div class="grid2" id="tools"><button class="btn secondary" data-act="openRaw" data-arg="${esc(code)}">Ham veri</button><button class="btn secondary" data-act="openCal" data-arg="${esc(code)}">Kalibrasyon</button></div>
 </main>`;
 };
 SCREENS.clinPatient.after = p => { if (!DAYCACHE[p.code]) computeDays(p.code).then(refresh); };
 SCREENS.raw = p => {
-  const code = p.code, meta = getMeta(code), model = getModel(code), r = B.live && B.live.code === code ? B.live : null;
-  return `<main>${backBtn('clinPatient', code)}
-  <h1>Ham veri</h1>
-  <div class="note"><b>Geliştirici ekranı</b>Ailelere gösterilmez.</div>
-  <section class="card grid2">
-    <div class="stat"><span>Ten tarafı</span><b>${r && r.skin !== null ? r.skin.toFixed(2) + ' °C' : '–'}</b></div>
-    <div class="stat"><span>Nem</span><b>${r && r.rh !== null ? Math.round(r.rh) + ' %' : '–'}</b></div>
-    <div class="stat"><span>Çip (kapak)</span><b>${r ? r.chip.toFixed(1) + ' °C' : '–'}</b></div>
-    <div class="stat"><span>Besleme</span><b>${meta.mv ? (meta.mv / 1000).toFixed(2) + ' V' : '–'}</b></div>
-  </section>
-  <section class="card"><b>Son 6 saat</b><div id="rawChart">${RAWCHART.code === code && RAWCHART.html ? RAWCHART.html : '<p class="small">Yükleniyor…</p>'}</div></section>
-  <section class="card small">${model ? `Kalibrasyon: oda ${model.Toff.toFixed(2)} °C, takılı ${model.Ton.toFixed(2)} °C, eşik ≥${model.thrOn.toFixed(2)} / ≤${model.thrOff.toFixed(2)} °C, τ ısınma ${Math.round(model.tauOn)} s, τ soğuma ${Math.round(model.tauOff)} s` : 'Kalibrasyon yok: varsayılan eşikler (29,7 / 27,8 °C) kullanılıyor.'}<br>Yazılım: ${esc(meta.fw || '–')} · sıradaki kayıt: ${meta.next}</section>
+  const code = p.code, meta = getMeta(code), model = modelFor(code), range = p.range || 6;
+  return `<main>${p.backTo ? backTo(p.backLabel || code) : backBtn('clinPatient', code)}
+  <h1>Ham veri</h1><p class="sub" style="margin-top:-8px">${esc(code)} · klinisyen ve yönetim ekranı, ailelere gösterilmez</p>
+  ${liveSection(code, true)}
+  <section class="card"><div class="row"><b>Sıcaklık</b><span class="seg">${[6, 24, 72].map(h => `<button class="chip${h === range ? ' on' : ''}" data-act="rawRange" data-arg="${h}">${h === 72 ? '3 gün' : h + ' sa'}</button>`).join('')}</span></div>
+    <div id="rawChart" style="margin-top:8px">${RAWCHART.key === code + '|' + range && RAWCHART.html ? RAWCHART.html : '<p class="small">Yükleniyor…</p>'}</div>
+    ${CHART_LEGEND}</section>
+  <section class="card list">${SkoliAlgo.facts(model).map(f => `<div class="li"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join('')}
+    <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model.isDefault ? 'yok (varsayılan değerler)' : fmtDate(model.createdAt) + (model.kind === 'manual' ? ' · elle ayarlandı' : '')}</span></div>
+    <div class="li"><span class="k">Buton yazılımı</span><span class="v">${esc(meta.fw || '–')}</span></div></section>
+  <button class="btn primary" data-act="openCal" data-arg="${esc(code)}">Kalibrasyon sayfası</button>
   <div class="grid2"><button class="btn secondary" data-act="csvDay" data-arg="${esc(code)}">24 saat CSV</button><button class="btn secondary" data-act="csvCal" data-arg="${esc(code)}">Kalibrasyon CSV</button></div>
   <section class="card"><b>Bluetooth günlüğü</b><pre class="log">${esc(APP_VERSION + '\n' + B.log.join('\n'))}</pre></section>
 </main>`;
 };
-const RAWCHART = { code: null, html: '', at: 0 };
+const CHART_LEGEND = '<p class="legend">Mavi çizgi: ten tarafı · gri çizgi: kapak (çip) · mavi alan: algoritmaya göre takılı · gri alan: emin değil · kesikli çizgiler: eşikler</p>';
+const RAWCHART = { key: null, html: '', at: 0 };
 SCREENS.raw.after = async p => {
-  if (RAWCHART.code === p.code && Date.now() - RAWCHART.at < 10000) return;   // redraw at most every 10 s
-  RAWCHART.code = p.code; RAWCHART.at = Date.now();
-  const recs = (await getRecsAny(p.code, Date.now() - 6 * 3.6e6, Date.now() + 60e3)).filter(r => r.skin !== null);
-  const el = $('#rawChart'); if (!el) return;
-  if (recs.length < 2) { RAWCHART.html = el.innerHTML = '<p class="small">Veri yok.</p>'; return; }
-  const model = modelFor(p.code), W = 340, H = 140, t0 = Date.now() - 6 * 3.6e6;
-  const step = Math.max(1, Math.floor(recs.length / 400)), pts = recs.filter((_, i) => i % step === 0);
-  const lo = Math.min(model.thrOff - 2, ...pts.map(r => r.skin)), hi = Math.max(model.thrOn + 2, ...pts.map(r => r.skin));
-  const X = t => (W * (t - t0) / (6 * 3.6e6)).toFixed(1), Y = v => (H - 8 - (H - 16) * (v - lo) / (hi - lo)).toFixed(1);
-  RAWCHART.html = el.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Son 6 saatlik sıcaklık"><line x1="0" x2="${W}" y1="${Y(model.thrOn)}" y2="${Y(model.thrOn)}" stroke="#0B1F44" stroke-dasharray="4 4"/><line x1="0" x2="${W}" y1="${Y(model.thrOff)}" y2="${Y(model.thrOff)}" stroke="#5B6987" stroke-dasharray="2 4"/><polyline fill="none" stroke="#1E5EFF" stroke-width="2" points="${pts.map(r => X(r.t) + ',' + Y(r.skin)).join(' ')}"/><text x="2" y="12" font-size="10" fill="#5B6987">${hi.toFixed(1)} °C</text><text x="2" y="${H - 2}" font-size="10" fill="#5B6987">${lo.toFixed(1)} °C</text></svg>`;
+  const range = p.range || 6, key = p.code + '|' + range;
+  if (RAWCHART.key === key && Date.now() - RAWCHART.at < 15000) return;   // redraw at most every 15 s
+  RAWCHART.key = key; RAWCHART.at = Date.now(); RAWCHART.html = '';
+  const t1 = Date.now(), t0 = t1 - range * 3.6e6;
+  const recs = await getRecsAny(p.code, t0, t1 + 60e3, p.fid);
+  const el = $('#rawChart'); if (!el || screen !== 'raw') return;
+  RAWCHART.html = el.innerHTML = rawChartSvg(recs, modelFor(p.code), t0, t1, { chip: true, h: 170 });
 };
+
+// ---------- chart: temperature + what the algorithm decided + its lines (any algorithm: uses overlays/classify only) ----------
+function rawChartSvg(recs, model, t0, t1, o = {}) {
+  const W = 340, H = o.h || 150, B0 = H - 16;
+  const all = recs.filter(r => r.skin !== null && isFinite(r.skin) && r.t >= t0 - 1 && r.t <= t1 + 1).sort((a, b) => a.t - b.t);
+  if (all.length < 2) return '<p class="small">Bu aralıkta ölçüm yok. Butona bağlanıp senkronize et ya da ailenin senkronunu bekle.</p>';
+  const step = Math.max(1, Math.floor(all.length / 600)), pts = all.filter((_, i) => i % step === 0);
+  const lines = SkoliAlgo.overlays(model).filter(l => isFinite(l.value)), old = o.compare ? SkoliAlgo.overlays(o.compare).filter(l => isFinite(l.value) && l.kind !== 'ref') : [];
+  const vals = pts.map(r => r.skin).concat(lines.filter(l => l.kind !== 'ref').map(l => l.value), old.map(l => l.value), o.chip ? pts.filter(r => isFinite(r.chip)).map(r => r.chip) : []);
+  const lo = Math.min(...vals) - 0.5, hi = Math.max(...vals) + 0.5;
+  const xn = t => W * (t - t0) / (t1 - t0), X = t => xn(t).toFixed(1), Y = v => (B0 - (B0 - 8) * (v - lo) / (hi - lo)).toFixed(1);
+  let bands = '';
+  if (o.states !== false) {
+    const st = (o.result || SkoliAlgo.classify(all, model)).states;
+    let cur = null, a = t0;
+    const put = (k, x0, x1) => { if (k && x1 > x0) bands += `<rect x="${X(x0)}" y="0" width="${Math.max(0.6, xn(x1) - xn(x0)).toFixed(1)}" height="${B0}" fill="${k === 'on' ? '#1E5EFF' : '#8C9AB8'}" opacity="${k === 'on' ? 0.13 : 0.22}"/>`; };
+    for (const x of st) { const k = x.gapAfter ? null : x.unsure ? 'u' : x.state === 'on' ? 'on' : null, tt = Math.min(t1, Math.max(t0, x.t)); if (k !== cur) { put(cur, a, tt); cur = k; a = tt; } }
+    put(cur, a, Math.min(t1, st[st.length - 1].t));
+  }
+  const poly = (key, color, width) => { let out = '', seg = []; const flush = () => { if (seg.length > 1) out += `<polyline fill="none" stroke="${color}" stroke-width="${width}" points="${seg.join(' ')}"/>`; seg = []; };
+    pts.forEach((r, i) => { if (i && r.t - pts[i - 1].t > Math.max(60e3, step * 4e3)) flush(); if (isFinite(r[key])) seg.push(X(r.t) + ',' + Y(r[key])); }); flush(); return out; };
+  const hl = (l, color, dash, w) => `<line x1="0" x2="${W}" y1="${Y(l.value)}" y2="${Y(l.value)}" stroke="${color}" stroke-dasharray="${dash}" stroke-width="${w}"/><text x="${W - 2}" y="${(+Y(l.value) - 3).toFixed(1)}" font-size="9" text-anchor="end" fill="${color}">${esc(l.label)} ${l.value.toFixed(1)}</text>`;
+  const lineSvg = lines.map(l => l.kind === 'ref' ? hl(l, '#9AA6BF', '1 3', 1) : hl(l, o.compare ? '#1E5EFF' : '#0B1F44', l.kind === 'on' ? '5 3' : '2 3', o.compare ? 1.6 : 1.2)).join('')
+    + old.map(l => `<line x1="0" x2="${W}" y1="${Y(l.value)}" y2="${Y(l.value)}" stroke="#8C9AB8" stroke-dasharray="2 2" stroke-width="1"/>`).join('');
+  const span = t1 - t0, tl = t => span > 30 * 3.6e6 ? `${fmtDate(t)} ${new Date(t).toTimeString().slice(0, 5)}` : new Date(t).toTimeString().slice(0, 5);
+  const axis = `<text x="1" y="${H - 3}" font-size="9" fill="#5B6987">${tl(t0)}</text><text x="${W / 2}" y="${H - 3}" font-size="9" text-anchor="middle" fill="#5B6987">${tl(t0 + span / 2)}</text><text x="${W - 1}" y="${H - 3}" font-size="9" text-anchor="end" fill="#5B6987">${tl(t1)}</text><text x="2" y="10" font-size="9" fill="#5B6987">${hi.toFixed(1)} °C</text><text x="2" y="${B0 - 2}" font-size="9" fill="#5B6987">${lo.toFixed(1)} °C</text>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.label || 'Sıcaklık grafiği')}">${bands}${o.chip ? poly('chip', '#9AA6BF', 1) : ''}${poly('skin', '#1E5EFF', 1.8)}${lineSvg}${axis}</svg>`;
+}
+
+// ---------- live temperature (optional; needs the button nearby) ----------
+B.liveBuf = [];
+function noteLive(r) { const cut = Date.now() - 15 * 60e3; B.liveBuf = B.liveBuf.filter(x => x.code === r.code && x.t > cut); B.liveBuf.push(r); }
+const showLive = () => !!lsGet('sk.showLive', false);
+function liveInner(code) {
+  const conn = B.connected && B.info && B.info.code === code;
+  if (!conn) return `<p class="small" style="margin-bottom:8px">Canlı sıcaklık için butonun yanında ol ve bağlan. (Bağlıyken buton başka cihaza bağlanamaz.)</p><button class="btn secondary" data-act="liveConnect" data-arg="${esc(code)}">Butona bağlan</button>`;
+  if (B.syncing) return `<div class="pill"><span class="dot wait"></span>${syncText()}</div>`;
+  const r = B.live && B.live.code === code && Date.now() - B.live.t < 30e3 ? B.live : null;
+  if (!r) return '<p class="small">Bağlı. Canlı ölçüm bekleniyor…</p>';
+  const model = modelFor(code), buf = B.liveBuf.filter(x => x.code === code && x.skin !== null);
+  let st = '–';
+  if (buf.length >= 3) { const c = SkoliAlgo.classify(buf, model), x = c.states[c.states.length - 1]; st = x.unsure ? 'emin değil' : x.state === 'on' ? 'takılı' : 'çıkarılmış'; }
+  return `<div class="grid2">
+    <div class="stat"><span>Ten tarafı</span><b>${r.skin !== null ? r.skin.toFixed(2) + ' °C' : 'ERR'}</b></div>
+    <div class="stat"><span>Nem</span><b>${r.rh !== null ? Math.round(r.rh) + ' %' : '–'}</b></div>
+    <div class="stat"><span>Kapak (çip)</span><b>${isFinite(r.chip) ? r.chip.toFixed(1) + ' °C' : '–'}</b></div>
+    <div class="stat"><span>Algoritma şu an</span><b>${st}</b></div></div>
+    ${buf.length >= 2 ? `<div style="margin-top:8px">${rawChartSvg(buf, model, Date.now() - 10 * 60e3, Date.now(), { h: 110, chip: true, label: 'Son 10 dakika' })}</div><p class="legend">Son 10 dakika, her 2 saniyede bir.</p>` : ''}`;
+}
+function liveSection(code, always) {
+  const on = always || showLive();
+  return `<section class="card"><div class="row"><b>Canlı sıcaklık</b>${always ? '' : `<button class="btn text" data-act="liveToggle" style="min-height:36px">${on ? 'Gizle' : 'Göster'}</button>`}</div>${on ? `<div data-live="${esc(code)}" style="margin-top:8px">${liveInner(code)}</div>` : ''}</section>`;
+}
+function updateLive() { document.querySelectorAll('[data-live]').forEach(el => { if (!el.contains(document.activeElement)) el.innerHTML = liveInner(el.dataset.live); }); }
+
+// ---------- calibration page (clinician + owner). Built ONLY from the algorithm contract
+//            (INFO, PROTOCOL, params, applyParams, overlays, facts, classify), so it stays the same when the algorithm changes ----------
+const staffRole = () => (window.SRV_ON && SRV.profile) ? SRV.profile.role : 'clinician';
+const backTo = label => `<div class="top"><button class="back" data-act="goBack" aria-label="${esc(label || 'Geri')}">‹ ${esc(label || 'Geri')}</button><span></span></div>`;
+const CALP = { code: null, fid: null, cur: null, vals: null, next: null, err: [], warn: [], hist: [], loaded: false, range: 24, recs: null, recsKey: '', t: null };
+const whoTR = r => ({ family: 'aile', clinician: 'klinisyen', owner: 'yönetici' })[r] || r || '–';
+SCREENS.calPage = p => {
+  if (CALP.code !== p.code) Object.assign(CALP, { code: p.code, fid: p.fid, cur: null, vals: null, next: null, err: [], warn: [], hist: [], loaded: false, recs: null, recsKey: '' });
+  const code = p.code, cur = CALP.cur || modelFor(code), ps = SkoliAlgo.params(cur);
+  const vals = CALP.vals || Object.fromEntries(ps.map(x => [x.key, x.value]));
+  const groups = [...new Set(ps.map(x => x.group || 'Ayarlar'))];
+  const conn = B.connected && B.info && B.info.code === code;
+  const form = groups.map(g => `<section class="card"><b>${esc(g)}</b>${ps.filter(x => (x.group || 'Ayarlar') === g).map(x => `
+      <label class="f" style="margin-top:12px">${esc(x.label)} (${esc(x.unit)})<input class="in" type="number" inputmode="decimal" data-param="${esc(x.key)}" step="${x.step}" min="${x.min}" max="${x.max}" value="${esc(String(vals[x.key]))}"></label>
+      <p class="help">${esc(x.help || '')}</p>`).join('')}</section>`).join('');
+  const hist = CALP.hist.map(h => `<div class="li"><span><span class="k">${fmtDate(h.at)} ${new Date(h.at).toTimeString().slice(0, 5)}</span><br><span class="small">${whoTR(h.by)} · ${h.kind === 'manual' ? 'elle ayar' : 'ölçüm'}${h.ok === false ? ' · başarısız' : ''}</span></span><span class="v small">${h.model && SkoliAlgo.accepts(h.model) ? esc((SkoliAlgo.facts(h.model).find(f => /eşik/i.test(f.label)) || {}).value || '') : ''}</span></div>`).join('');
+  return `<main>${backTo(p.backLabel || code)}
+  <h1>Kalibrasyon</h1><p class="sub" style="margin-top:-8px">${esc(p.name || '')}${p.name ? ' · ' : ''}${esc(code)}</p>
+  <section class="card"><b>${esc(SkoliAlgo.INFO.name)}</b><p class="help" style="margin-top:6px">${esc(SkoliAlgo.INFO.summary)}</p></section>
+  <section class="card list"><div class="li"><span class="k">Şu anki ayar</span><span class="v">${cur.isDefault ? 'varsayılan (kalibrasyon yok)' : `${fmtDate(cur.createdAt)} · ${whoTR(cur.by)} · ${cur.kind === 'manual' ? 'elle' : 'ölçüm'}`}</span></div>
+    ${SkoliAlgo.facts(cur).map(f => `<div class="li"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join('')}</section>
+  ${liveSection(code, true)}
+  <section class="card"><div class="row"><b>Önizleme</b><span class="seg">${[24, 72].map(h => `<button class="chip${h === CALP.range ? ' on' : ''}" data-act="calRange" data-arg="${h}">${h === 72 ? '3 gün' : '24 sa'}</button>`).join('')}</span></div>
+    <div id="calPrev" style="margin-top:8px"><p class="small">Yükleniyor…</p></div>${CHART_LEGEND}</section>
+  <h2 style="margin:6px 0 0">Ayarları değiştir</h2>
+  <p class="small">Değiştirdikçe yukarıdaki önizleme yeni ayarla yeniden hesaplanır. Kaydedince ailenin saatleri bu ayarla hesaplanır.</p>
+  ${form}
+  <div id="calMsgs"></div>
+  <button class="btn primary" id="calSave" data-act="calSave">Kaydet</button>
+  <button class="btn text" data-act="calUndo" style="align-self:center">Değişiklikleri geri al</button>
+  <section class="card"><b>Ölçerek yeniden kalibre et</b><p class="help" style="margin:6px 0 10px">${PROTO().map((x, i) => `${i + 1}. ${esc(x.list || x.title)} (${Math.round(x.seconds / 60)} dk)`).join(' · ')}. Buton bağlı olmalı.</p>
+    <button class="btn secondary" data-act="calMeasure" ${conn ? '' : 'disabled'}>${conn ? 'Ölçümü başlat' : 'Önce butona bağlan (yukarıda)'}</button></section>
+  <section class="card list"><div class="li"><span class="k">Geçmiş</span><span></span></div>${hist || '<p class="small">Kayıt yok.</p>'}</section>
+</main>`;
+};
+SCREENS.calPage.after = p => {
+  if (!CALP.loaded) { CALP.loaded = true; calLoad().then(() => { if (screen === 'calPage') render(); }).catch(e => toast(trErr(e))); }
+  calPreview();
+};
+async function calLoad() {
+  const code = CALP.code, fid = CALP.fid;
+  let rows = [];
+  if (window.SRV_ON && SRV.profile && fid) {
+    rows = SRV.profile.role === 'owner' ? await SRV.rpc('owner_calibrations', { p_family: fid })
+      : await sv(SRV.sb.from('calibrations').select('*').eq('family_id', fid).order('created_at', { ascending: false }).limit(20));
+    CALP.hist = rows.map(r => ({ at: Date.parse(r.created_at), by: r.by_role, kind: r.kind || 'measured', ok: r.ok, model: r.model, code: r.button_code }));
+    const best = rows.find(r => r.ok && r.model && r.button_code === code && SkoliAlgo.accepts(r.model));
+    const local = getModel(code);
+    if (best && (!local || (best.model.createdAt || 0) > (local.createdAt || 0))) { lsSet('sk.model.' + code, best.model); delete DAYCACHE[code]; }
+  } else {
+    CALP.hist = lsGet('sk.calhist.' + code, []).slice().reverse().map(h => ({ at: h.at, by: h.by, kind: h.kind || 'measured', ok: true, model: h.model }));
+  }
+  CALP.cur = modelFor(code);
+}
+async function calPreview() {
+  const code = CALP.code; if (!code || screen !== 'calPage') return;
+  const cur = CALP.cur || modelFor(code);
+  const changed = !!CALP.vals && SkoliAlgo.params(cur).some(x => String(CALP.vals[x.key]) !== String(x.value));
+  const res = changed ? SkoliAlgo.applyParams(cur, CALP.vals) : { model: null, errors: [], warnings: [] };
+  CALP.next = res.model; CALP.err = res.errors; CALP.warn = res.warnings;
+  const msgs = $('#calMsgs');
+  if (msgs) msgs.innerHTML = res.errors.map(e => `<div class="warn"><b>Düzelt:</b> ${esc(e)}</div>`).join('') + res.warnings.map(w => `<div class="warn">${esc(w)}</div>`).join('');
+  const save = $('#calSave'); if (save) save.disabled = !(res.model && !res.errors.length);
+  const t1 = Date.now(), t0 = t1 - CALP.range * 3.6e6, key = code + '|' + CALP.range + '|' + Math.floor(t1 / 120e3);
+  if (CALP.recsKey !== key) { CALP.recsKey = key; CALP.recs = await getRecsAny(code, t0, t1 + 60e3, CALP.fid); }
+  const el = $('#calPrev'); if (!el || screen !== 'calPage') return;
+  const recs = CALP.recs || [], show = res.model || cur;
+  const a = recs.length > 1 ? SkoliAlgo.classify(recs, cur) : null, b = res.model && recs.length > 1 ? SkoliAlgo.classify(recs, res.model) : null;
+  const perDay = r => { const out = {}; if (!r) return out; const st = r.states; for (let i = 0; i < st.length - 1; i++) { if (st[i].gapAfter) continue; const k = dateKey(st[i].t), o = out[k] || (out[k] = { on: 0, un: 0, data: 0 }), dt = st[i + 1].t - st[i].t; o.data += dt; if (st[i].unsure) o.un += dt; else if (st[i].state === 'on') o.on += dt; } return out; };
+  const da = perDay(a), db = perDay(b), days = Object.keys(da).sort();
+  const table = days.length ? `<table class="cmp"><tr><th>Gün</th><th>Veri</th><th>Şu an</th>${b ? '<th>Yeni ayarla</th>' : ''}</tr>${days.map(k => `<tr><td>${fmtDate(Date.parse(k + 'T12:00:00'))}</td><td>${fmtH1(da[k].data)} sa</td><td>${fmtH1(da[k].on)} sa${da[k].un > 6e4 ? ` <span class="small">(+${fmtH1(da[k].un)} emin değil)</span>` : ''}</td>${b ? `<td><b>${fmtH1((db[k] || {}).on || 0)} sa</b>${(db[k] || {}).un > 6e4 ? ` <span class="small">(+${fmtH1(db[k].un)} emin değil)</span>` : ''}</td>` : ''}</tr>`).join('')}</table>
+    <p class="legend">Saatler sadece bu cihazın gördüğü ölçümlerden hesaplanır (bu aralıktaki ham veri).</p>` : '';
+  el.innerHTML = rawChartSvg(recs, show, t0, t1, { chip: true, h: 170, compare: res.model ? cur : null, result: res.model ? b : a }) + (res.model ? '<p class="legend">Mavi çizgiler: yeni eşikler · gri kesikli: şimdiki eşikler. Mavi alan yeni ayara göre.</p>' : '') + table;
+}
 
 // ================= actions =================
 const ACTIONS = {
@@ -878,13 +1021,13 @@ const ACTIONS = {
     await deleteCode(c); delete DAYCACHE[c];
     session = null; ssSet('sk.session', null); go('login'); toast('Silindi.');
   },
-  calOpen: by => { if (by === 'family' && familyNeedsButton()) return go('famNewButton'); CAL.by = by; CAL.code = by === 'clinician' ? params.code : session.code; CAL.phase = null; CAL.result = null; go('calib', params); },
+  calOpen: by => { if (by === 'family' && familyNeedsButton()) return go('famNewButton'); CAL.by = by; CAL.code = by === 'clinician' ? params.code : session.code; CAL.fid = null; CAL.phase = null; CAL.result = null; go('calib', params); },
   calStart: () => {
     if (!B.connected || !B.info) return;
     if (B.info.code !== CAL.code) { alert(`Bağlı buton (${B.info.code}) bu hesaba ait değil (${CAL.code}).`); return; }
-    CAL.buf = { off: [], on: [] }; CAL.phase = 'off'; CAL.start = Date.now(); calTick(); render();
+    CAL.buf = {}; calBeginStep(0);
   },
-  calOnStart: () => { CAL.phase = 'on'; CAL.start = Date.now(); CAL.buf.on = []; calTick(); render(); },
+  calStepStart: () => { CAL.phase = 'run'; CAL.start = Date.now(); CAL.buf[CAL.key] = []; calTick(); render(); },
   calCancel: () => { clearTimeout(CAL.timer); CAL.phase = null; render(); },
   calReset: () => { CAL.phase = null; CAL.result = null; render(); },
   clinLoginBtn: async () => {
@@ -898,7 +1041,7 @@ const ACTIONS = {
     go('clinPatient', { code });
   },
   openPatient: c => go('clinPatient', { code: c }),
-  openRaw: c => go('raw', { code: c }),
+  openRaw: c => { const pr = profiles()[c] || {}; go('raw', { code: c, fid: pr.familyId, name: pr.displayName || '', backTo: { screen, params: Object.assign({}, params) }, backLabel: pr.displayName || c }); },
   clinGoal: d => {
     const P = profiles(), code = params.code, p = P[code] || (P[code] = { goal: 16, goalHistory: [] });
     const from = p.goal || 16, to = Math.min(23, Math.max(1, from + +d)); if (to === from) return;
@@ -917,6 +1060,54 @@ const ACTIONS = {
     download(`skolidata_${c}_calibration.csv`, 'time_s,skin_C,humidity_pct,phase\n' + raw.off.map(line('off')).concat(raw.on.map(line('on'))).join('\n'));
   },
 };
+Object.assign(ACTIONS, {
+  goBack: () => { const b = params.backTo || { screen: 'login', params: {} }; go(b.screen, b.params || {}); },
+  liveToggle: () => { lsSet('sk.showLive', !showLive()); render(); },
+  liveConnect: async code => {
+    const opts = { expect: code }; if (staffRole() === 'clinician' && CLIN_ALLOW) opts.allow = CLIN_ALLOW;
+    const ok = await bleConnect(opts);
+    if (ok) { const m = getMeta(code); if (!m.firstSeen) { m.firstSeen = Date.now(); setMeta(code, m); } delete DAYCACHE[code]; RAWCHART.at = 0; CALP.recsKey = ''; }
+    render();
+  },
+  rawRange: h => go('raw', Object.assign({}, params, { range: +h })),
+  openCal: c => {
+    const pr = profiles()[c] || {}, from = { screen, params: Object.assign({}, params) };
+    go('calPage', { code: c, fid: params.fid || pr.familyId, name: params.name || pr.displayName || '', backTo: from, backLabel: screen === 'raw' ? 'Ham veri' : (params.name || pr.displayName || c) });
+  },
+  calRange: h => { CALP.range = +h; CALP.recsKey = ''; render(); },
+  calUndo: () => { CALP.vals = null; render(); },
+  calSave: async () => {
+    await calPreview();
+    const m = CALP.next; if (!m || CALP.err.length) { toast(CALP.err[0] || 'Değişiklik yok.'); return; }
+    if (!confirm('Yeni ayarlar kaydedilsin mi?\n\nBu ailenin saatleri yeni ayarla yeniden hesaplanır (ailenin uygulaması bir sonraki senkronda günceller). Her değişiklik kayıt altına alınır.')) return;
+    const role = staffRole(), model = Object.assign({}, m, { by: role }), code = CALP.code;
+    busy(true);
+    try {
+      if (window.SRV_ON && SRV.profile) {
+        if (!CALP.fid) throw new Error('Aile bulunamadı.');
+        if (role === 'owner') await SRV.rpc('owner_save_calibration', { p_family: CALP.fid, p_ok: true, p_kind: 'manual', p_model: model });
+        else await sv(SRV.sb.from('calibrations').insert({ family_id: CALP.fid, button_code: code, by_role: 'clinician', by_id: SRV.user.id, ok: true, kind: 'manual',
+          toff: model.Toff ?? null, ton: model.Ton ?? null, tau_on: model.tauOn ?? null, tau_off: model.tauOff ?? null, model }));
+        if (SRV.detail) SRV.detail[code] = null;
+      }
+      lsSet('sk.model.' + code, model);
+      const hist = lsGet('sk.calhist.' + code, []); hist.push({ at: model.createdAt, by: role, kind: 'manual', model }); lsSet('sk.calhist.' + code, hist.slice(-20));
+      lsSet('sk.days.' + code, {}); delete DAYCACHE[code];
+      Object.assign(CALP, { cur: model, vals: null, next: null, loaded: false });
+      render(); toast('Kaydedildi. Ailenin saatleri yeni ayarla hesaplanacak.');
+    } catch (e) { toast(trErr(e)); } finally { busy(false); }
+  },
+  calMeasure: () => {
+    if (!(B.connected && B.info && B.info.code === CALP.code)) { toast('Önce butona bağlan.'); return; }
+    Object.assign(CAL, { by: staffRole(), code: CALP.code, fid: CALP.fid, phase: null, result: null });
+    go('calib', { backTo: { screen: 'calPage', params: Object.assign({}, params) } });
+  },
+});
+document.addEventListener('input', e => {
+  const k = e.target && e.target.dataset && e.target.dataset.param; if (!k || screen !== 'calPage') return;
+  if (!CALP.vals) CALP.vals = Object.fromEntries(SkoliAlgo.params(CALP.cur || modelFor(CALP.code)).map(x => [x.key, x.value]));
+  CALP.vals[k] = e.target.value; clearTimeout(CALP.t); CALP.t = setTimeout(calPreview, 450);
+});
 let CLIN_ALLOW = null;   // server mode: only buttons of families who shared with this clinician
 function download(name, text) {
   try { if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {}); } catch (e) {}
@@ -969,7 +1160,7 @@ window.onSynced = async code => {
   const days = Object.values(DAYCACHE[code] || {}).filter(d => d.dataMs > 0 && !d.fromServer);
   const rows = days.map(d => ({ family_id: SRV.user.id, day: d.key, worn_min: Math.round(d.ms / 6e4), unsure_min: Math.round(d.unsureMs / 6e4),
     data_min: Math.min(1440, Math.round(d.dataMs / 6e4)), segments: d.segs.map(([a, b]) => [Math.round((a - d.start) / 6e4), Math.round((b - d.start) / 6e4)]),
-    algo: 'v1', model_at: d.modelAt || 0, button_code: code, updated_at: new Date().toISOString() }));
+    algo: SkoliAlgo.INFO.id, model_at: d.modelAt || 0, button_code: code, updated_at: new Date().toISOString() }));
   if (rows.length) await sv(SRV.sb.from('day_summaries').upsert(rows, { onConflict: 'family_id,day,button_code' }));
   const m = getMeta(code);
   await sv(SRV.sb.from('device_status').update({ mv: m.mv || null, fw: m.fw || null, flash: B.info ? !!B.info.flash : null,
@@ -989,14 +1180,15 @@ SRV.uploadRaw = async code => {
   if (lsGet(k, null) === dirty) lsDel(k);       // newer readings that arrived meanwhile stay marked
 };
 // calibration result (both ok and failed) goes to the server; a clinician's result reaches the family's phone
-window.onCalibrated = async (code, res, by) => {
+window.onCalibrated = async (code, res, by, fidIn) => {
   if (!SRV.on || !SRV.user || !SRV.profile) return;
-  const fid = by === 'clinician' ? (profiles()[code] || {}).familyId : SRV.user.id;
+  const fid = by === 'family' ? SRV.user.id : (fidIn || (profiles()[code] || {}).familyId);
   if (!fid || (by === 'family' && SRV.profile.button_code !== code)) return;
-  const d = res.details || {};
-  await sv(SRV.sb.from('calibrations').insert({ family_id: fid, button_code: code, by_role: by, by_id: SRV.user.id, ok: !!res.ok,
-    toff: d.Toff ?? null, ton: d.Ton ?? null, tau_on: d.tauOn ?? null, tau_off: d.tauOff ?? null, model: res.ok ? res.model : null }));
-  if (by === 'clinician') SRV.detail[code] = null;
+  const d = res.details || {}, model = res.ok ? Object.assign({}, res.model, { by }) : null;
+  if (by === 'owner') await SRV.rpc('owner_save_calibration', { p_family: fid, p_ok: !!res.ok, p_kind: 'measured', p_model: model || d });
+  else await sv(SRV.sb.from('calibrations').insert({ family_id: fid, button_code: code, by_role: by, by_id: SRV.user.id, ok: !!res.ok,
+    toff: d.Toff ?? null, ton: d.Ton ?? null, tau_on: d.tauOn ?? null, tau_off: d.tauOff ?? null, model }));
+  if (by !== 'family') SRV.detail[code] = null;
 };
 // a server day row -> the app's day object
 function rowToDay(r) {
@@ -1359,13 +1551,14 @@ if (SRV.on) {
     const name = (profiles()[p.code] || {}).displayName;
     let html = baseClinPatient(p);
     if (name) html = html.replace(`<h1>${esc(p.code)}</h1>`, `<h1>${esc(name)}</h1><p class="sub" style="margin-top:-8px">${esc(p.code)}</p>`);
-    if (d && d.cal) html = html.replace(/(<span class="k">Kalibrasyon<\/span><span class="v">)[^<]*/, `$1${fmtDate(Date.parse(d.cal.created_at))} · ${d.cal.by_role === 'clinician' ? 'klinisyen' : 'aile'}`);
+    if (d && d.cal) html = html.replace(/(<span class="k">Kalibrasyon<\/span><span class="v">)[^<]*/, `$1${fmtDate(Date.parse(d.cal.created_at))} · ${whoTR(d.cal.by_role)}${d.cal.kind === 'manual' ? ' · elle' : ''}`);
     if ((profiles()[p.code] || {}).noButton) {
       html = html.replace(`<p class="sub" style="margin-top:-8px">${esc(p.code)}</p>`, '<p class="sub" style="margin-top:-8px">Şu an butonu yok</p>')
         .replace(/<button class="btn secondary" data-act="clinConnect">[^<]*<\/button>/, '')
-        .replace(/<button class="btn primary" data-act="calOpen"[^>]*>[^<]*<\/button>/, '<div class="note"><b>Butonu yok</b>Aile yeni butonunu kendi uygulamasından bağlayabilir; saatleri yeniden gelmeye başlar.</div>');
+        .replace(/<button class="btn secondary" data-act="openCal"[^>]*>[^<]*<\/button>/, '')
+        .replace('<div class="grid2" id="tools">', '<div class="note"><b>Butonu yok</b>Aile yeni butonunu kendi uygulamasından bağlayabilir; saatleri yeniden gelmeye başlar.</div>\n  <div class="grid2" id="tools">');
     } else {
-      html = html.replace('<button class="btn text" data-act="openRaw"', `<button class="btn text" data-act="clinRelease" style="align-self:center">Butonu bu aileden ayır</button>\n  <button class="btn text" data-act="openRaw"`);
+      html = html.replace(/(<div class="grid2" id="tools">[\s\S]*?<\/div>)/, `$1\n  <button class="btn text" data-act="clinRelease" style="align-self:center">Butonu bu aileden ayır</button>`);
     }
     return html;
   };
@@ -1468,6 +1661,8 @@ if (SRV.on) {
       <div class="li"><span class="k">Klinisyen</span><span class="v">${f.clinicians}</span></div>
       <div class="li"><span class="k">Kayıt</span><span class="v">${fmtDate(Date.parse(f.created_at))}</span></div>
     </section>
+    ${f.button_code ? `${liveSection(f.button_code)}
+    <div class="grid2"><button class="btn secondary" data-act="ownerRaw">Ham veri</button><button class="btn secondary" data-act="ownerCal">Kalibrasyon</button></div>` : ''}
     <section class="card"><b>Buton ataması</b><p class="small" style="margin:4px 0 8px">Bu aileye başka bir buton ver. Buton başka bir ailedeyse ondan alınır. Her değişiklik erişim günlüğüne yazılır.</p>
       <label class="f">Buton kodu<input class="in" id="ac" placeholder="SK-XXXXXXXX" autocapitalize="characters" value="${esc(read)}"></label>
       <div class="grid2" style="margin-top:10px"><button class="btn secondary" data-act="ownerReadButton">Butonu oku</button><button class="btn primary" data-act="ownerAssign">Bu butonu ver</button></div>
@@ -1508,6 +1703,10 @@ if (SRV.on) {
   ACTIONS.ownerApprove = async id => { try { const code = await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: true }); toast('Onaylandı: ' + code); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerReject = async id => { if (!confirm('Bu klinisyen onaylanmayacak. Emin misin?')) return; try { await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: false }); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerOpenFam = id => go('ownerFam', { id });
+  const ownerTo = s => { const f = SRV.owner.families.find(x => x.id === params.id); if (!f || !f.button_code) return;
+    go(s, { code: f.button_code, fid: f.id, name: famName(f), backTo: { screen: 'ownerFam', params: { id: f.id } }, backLabel: famName(f) }); };
+  ACTIONS.ownerRaw = () => ownerTo('raw');
+  ACTIONS.ownerCal = () => ownerTo('calPage');
   ACTIONS.ownerScan = async () => {
     const ok = await bleConnect({ infoOnly: true });
     if (!ok || !B.info) return;
