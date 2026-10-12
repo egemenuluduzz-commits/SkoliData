@@ -97,7 +97,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.11 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.12 · algo ' + SkoliAlgo.INFO.id;
 // clinician accounts made by SkoliData use a user name; behind the scenes it is <name>@klinisyen.skolidata.app (no mail is ever sent)
 const CLIN_DOMAIN = '@klinisyen.skolidata.app';
 const clinLoginEmail = u => { u = (u || '').trim().toLowerCase(); return u.includes('@') ? u : u + CLIN_DOMAIN; };
@@ -630,6 +630,7 @@ SCREENS.famHome = () => {
   <div class="ringwrap" role="img" aria-label="Bugün ${fmtHM(today.ms)} takıldı, hedef ${p.goal || 16} saat">${ringSvg(Math.min(1, today.ms / goalMs))}
     <div class="ringtxt"><div class="big"><b>${Math.floor(today.ms / 3.6e6)}</b><i>sa</i><b>${Math.floor((today.ms % 3.6e6) / 6e4)}</b><i>dk</i></div><div class="goal">Hedef ${p.goal || 16} sa</div></div></div>
   <div class="pill"><span class="dot ${status[0]}"></span><span>${status[1]}</span></div>
+  ${B.connected && TREND.msg && TREND.code === code && Date.now() - TREND.at < 30 * 60e3 ? `<div class="note center"><b style="margin:0">${esc(TREND.msg)}</b><span class="small">${ago(TREND.at)}</span></div>` : ''}
   ${!B.connected ? '<button class="btn primary" data-act="connect">Butona bağlan</button>' : ''}
   <section class="card"><div class="row"><b>Bu hafta</b><span class="small">${wk.filter(w => w.d && w.d.ms >= goalMs).length} gün hedefte</span></div><div class="week">${dots}</div></section>
   ${calNote}${unevenNote}
@@ -842,7 +843,26 @@ function rawChartSvg(recs, model, t0, t1, o = {}) {
 
 // ---------- live temperature (optional; needs the button nearby) ----------
 B.liveBuf = [];
-function noteLive(r) { const cut = Date.now() - 15 * 60e3; B.liveBuf = B.liveBuf.filter(x => x.code === r.code && x.t > cut); B.liveBuf.push(r); }
+// ---------- warming / cooling words for the family (no numbers are shown) ----------
+// more than 1 °C up from the lowest point -> "putting the brace on"; more than 1 °C down from the highest point -> "took it off".
+// The same message never comes twice in a row (a further rise from 33 to 34 °C after "putting on" says nothing).
+const TREND = { code: null, dir: null, lo: null, hi: null, buf: [], msg: null, at: 0 };
+const TREND_C = 1.0;
+const TREND_MSG = { up: 'Korseyi takmaya başladığını görüyorum.', down: 'Korseyi çıkarttın sanırsam.' };
+function noteTrend(r) {
+  if (r.skin === null || !isFinite(r.skin)) return;
+  if (TREND.code !== r.code) Object.assign(TREND, { code: r.code, dir: null, lo: null, hi: null, buf: [], msg: null, at: 0 });
+  TREND.buf.push(r.skin); if (TREND.buf.length > 5) TREND.buf.shift();
+  const b = TREND.buf.slice().sort((x, y) => x - y), T = b[b.length >> 1];       // median of the last 5 readings (10 s): no single spike counts
+  if (TREND.lo === null) { TREND.lo = TREND.hi = T; return; }
+  TREND.lo = Math.min(TREND.lo, T); TREND.hi = Math.max(TREND.hi, T);
+  let said = null;
+  if (TREND.dir !== 'up' && T - TREND.lo > TREND_C) { TREND.dir = said = 'up'; TREND.hi = T; }
+  else if (TREND.dir !== 'down' && TREND.hi - T > TREND_C) { TREND.dir = said = 'down'; TREND.lo = T; }
+  if (said) { TREND.msg = TREND_MSG[said]; TREND.at = Date.now(); if (session && session.role === 'family' && screen === 'famHome') toast(TREND.msg); }
+}
+function noteLive(r) {
+  noteTrend(r); const cut = Date.now() - 15 * 60e3; B.liveBuf = B.liveBuf.filter(x => x.code === r.code && x.t > cut); B.liveBuf.push(r); }
 const showLive = () => !!lsGet('sk.showLive', false);
 function liveInner(code) {
   const conn = B.connected && B.info && B.info.code === code;
