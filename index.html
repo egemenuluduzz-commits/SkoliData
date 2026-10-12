@@ -89,7 +89,7 @@ svg.chart{width:100%;height:auto;display:block}
 <script>
 'use strict';
 const APP_VERSION = 'app v1.2 · algo v1';
-const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e', NUS_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e', NUS_TX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const SK_SVC = '508d0001-ade4-4fb4-9f46-45ea6a7e9c8f', SK_RX = '508d0002-ade4-4fb4-9f46-45ea6a7e9c8f', SK_TX = '508d0003-ade4-4fb4-9f46-45ea6a7e9c8f';   // SkoliData's own Bluetooth service
 // Clinician accounts: only a salted SHA-256 of the password is stored here (never the password itself).
 // NOTE: this is a front door for testing, not real security; real accounts need the server (master plan §6-7).
 const CLINICIANS = [{ u: 'klinisyen', salt: '5421f45dc65f8046e7b1231c5b5fc80f', hash: 'e4a095d63996a4ced0aa39f2d3f0633b469adc340db00dc81c4b7dc6f3d909c1', name: 'Klinisyen' }];
@@ -181,8 +181,8 @@ function bleDisconnect() { try { if (B.device && B.device.gatt && B.device.gatt.
 async function bleConnect(opts = {}) {
   if (!navigator.bluetooth) { alert("Bu tarayıcı Bluetooth'a bağlanamıyor. iPhone'da ücretsiz \"Bluefy\" uygulamasıyla, Android'de Chrome ile aç."); return false; }
   try {
-    const filters = opts.expect ? [{ name: opts.expect }] : [{ namePrefix: 'SK-' }, { services: [NUS] }];
-    const dev = await navigator.bluetooth.requestDevice({ filters, optionalServices: [NUS] });
+    const filters = opts.expect ? [{ name: opts.expect }] : [{ namePrefix: 'SK-' }, { services: [SK_SVC] }];
+    const dev = await navigator.bluetooth.requestDevice({ filters, optionalServices: [SK_SVC] });
     B.device = dev; B.live = null;
     // one listener per device and per characteristic: a phone may hand back the SAME objects on a reconnect,
     // and a second listener would feed every packet in twice (that scrambles the binary readings)
@@ -193,9 +193,9 @@ async function bleConnect(opts = {}) {
       refresh();
     }); }
     const server = await B.device.gatt.connect();
-    const svc = await server.getPrimaryService(NUS);
-    const tx = await svc.getCharacteristic(NUS_TX);
-    B.rx = await svc.getCharacteristic(NUS_RX);
+    const svc = await server.getPrimaryService(SK_SVC);
+    const tx = await svc.getCharacteristic(SK_TX);
+    B.rx = await svc.getCharacteristic(SK_RX);
     if (B.tx && B.onNotify) { try { B.tx.removeEventListener('characteristicvaluechanged', B.onNotify); } catch (e) {} }
     if (tx !== B.tx || !B.onNotify) {
       B.onNotify = ev => { const v = ev.target.value; onBytes(new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength))); };
@@ -274,7 +274,7 @@ async function syncAll(opts = {}) {
   B.info = null; B.syncing = true; refresh();
   for (let k = 0; k < 6 && !B.info; k++) { await send('i'); await waitFor(() => B.info, 1500); }
   if (!B.info) { B.syncing = false; toast('Buton yanıt vermedi.'); refresh(); return false; }
-  if (B.info.old) { B.syncing = false; alert('Bu butonda eski yazılım var (' + B.info.fw + '). SkoliData_4_Button yazılımını yükle.'); refresh(); return false; }
+  if (B.info.old) { B.syncing = false; alert('Bu butonda eski yazılım var (' + B.info.fw + '). Güncel buton yazılımını yükle.'); refresh(); return false; }
   let refuse = opts.expect && B.info.code !== opts.expect ? `Bu buton (${B.info.code}) senin hesabına bağlı değil. Hesabın yalnızca kendi butonunla (${opts.expect}) çalışır.` : null;
   if (!refuse && opts.allow) { try { refuse = await opts.allow(B.info.code); } catch (e) { refuse = (typeof trErr === 'function' ? trErr(e) : String(e)); } }
   if (refuse) { blog('reddedildi: ' + B.info.code); const info = B.info; bleDisconnect(); B.info = null; B.live = null; refresh(); alert(refuse); B.refused = info.code; return false; }
