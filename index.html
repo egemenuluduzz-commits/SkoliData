@@ -97,7 +97,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.12 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.13 · algo ' + SkoliAlgo.INFO.id;
 // clinician accounts made by SkoliData use a user name; behind the scenes it is <name>@klinisyen.skolidata.app (no mail is ever sent)
 const CLIN_DOMAIN = '@klinisyen.skolidata.app';
 const clinLoginEmail = u => { u = (u || '').trim().toLowerCase(); return u.includes('@') ? u : u + CLIN_DOMAIN; };
@@ -226,7 +226,8 @@ async function getRecsAny(code, t0, t1, fidIn) {
 }
 
 // ================= Bluetooth (protocol 2) =================
-const B = { device: null, rx: null, connected: false, info: null, chunk: null, syncing: false, live: null, log: [], writeQ: Promise.resolve(), rxBuf: new Uint8Array(0), binLeft: 0 };
+const B = { device: null, rx: null, connected: false, info: null, chunk: null, syncing: false, live: null, log: [], writeQ: Promise.resolve(), rxBuf: new Uint8Array(0), binLeft: 0, pend: [], rawT: 0 };
+const fwAtLeast = (fw, maj, min) => { const m = /fw(\d+)\.(\d+)/.exec(fw || ''); return !!m && (+m[1] > maj || (+m[1] === maj && +m[2] >= min)); };
 const syncText = () => 'Buton okunuyor…' + (B.syncing && B.progress > 0.02 && B.progress < 1 ? ' %' + Math.round(B.progress * 100) : '');
 function blog(t) { B.log.push(new Date().toLocaleTimeString('tr-TR') + '  ' + t); if (B.log.length > 40) B.log.shift(); }
 function send(cmd) {
@@ -241,7 +242,9 @@ function bleDisconnect() { try { if (B.device && B.device.gatt && B.device.gatt.
 async function bleConnect(opts = {}) {
   if (!navigator.bluetooth) { alert("Bu tarayıcı Bluetooth'a bağlanamıyor. iPhone'da ücretsiz \"Bluefy\" uygulamasıyla, Android'de Chrome ile aç."); return false; }
   try {
-    const filters = opts.expect ? [{ name: opts.expect }] : [{ namePrefix: 'SK-' }, { services: [SK_SVC] }];
+    const known = opts.expect ? getMeta(opts.expect).bleName : null;   // its Bluetooth name, if this phone has seen it
+    const filters = opts.expect ? [{ name: opts.expect }].concat(known && known !== opts.expect ? [{ name: known }] : [{ services: [SK_SVC] }])
+      : [{ namePrefix: 'SK-' }, { namePrefix: 'SkoliData' }, { services: [SK_SVC] }];
     const dev = await navigator.bluetooth.requestDevice({ filters, optionalServices: [SK_SVC] });
     B.device = dev; B.live = null;
     // one listener per device and per characteristic: a phone may hand back the SAME objects on a reconnect,
@@ -301,15 +304,31 @@ function decodeRec(dv, o) {
   if (t === 0xFFFFFFFF) return;
   if (t === 0xFFFFFFFE || t === 0xFFFFFFFD) {                                   // boot / battery records
     c.mv = skin & 0xFFFF;
-    if (t === 0xFFFFFFFE && idx < B.info.boot) B.seg = null;                    // a restart we never saw: times unknown until the next one
+    if (t === 0xFFFFFFFE) {                                                     // a power-on starts: readings waiting for a time stamp can't get one any more
+      c.untimed += B.pend.length; B.pend = []; B.rawT = 0;
+      if (idx < B.info.boot) B.seg = null;                                      // a restart we never saw: times unknown until a time stamp or the next one
+    }
     return;
   }
-  let wall;
-  if (idx >= B.info.boot) { wall = wallTime(t); c.lastT = t; }                 // this power-on
-  else if (B.seg && t >= B.seg.lastT && B.seg.wall + t * 1000 <= B.info.at) {  // an earlier power-on we know from the last sync
-    wall = B.seg.wall + t * 1000; B.seg.lastT = t;
-  } else { c.untimed++; return; }                                              // earlier power-on with unknown start: can't be timed
-  c.recs.push({ code: B.info.code, idx, t: wall, skin: skin === -32768 ? null : skin / 100, rh: rh2 === 255 ? null : rh2 / 2, chip: chip2 / 2 - 20 });
+  if (t === 0xFFFFFFFC) {                                                       // time stamp a phone left (firmware 0.7+): UTC seconds at the reading before it
+    const unix = ((skin & 0xFFFF) | (rh2 << 16) | (chip2 << 24)) >>> 0;
+    if (idx < B.info.boot && unix > 1.7e9) {
+      const segWall = unix * 1000 - B.rawT * 1000;
+      if (!B.seg) {
+        B.seg = { wall: segWall, lastT: B.rawT };
+        for (const p of B.pend) { const w = segWall + p.t * 1000; if (w <= B.info.at) c.recs.push(Object.assign(p.rec, { t: w })); else c.untimed++; }
+        B.pend = [];
+      }
+    }
+    return;
+  }
+  const rec = { code: B.info.code, idx, t: 0, skin: skin === -32768 ? null : skin / 100, rh: rh2 === 255 ? null : rh2 / 2, chip: chip2 / 2 - 20 };
+  B.rawT = t;
+  if (idx >= B.info.boot) { rec.t = wallTime(t); c.lastT = t; }               // this power-on
+  else if (B.seg && t >= B.seg.lastT && B.seg.wall + t * 1000 <= B.info.at) {  // an earlier power-on we know (last sync or a time stamp)
+    rec.t = B.seg.wall + t * 1000; B.seg.lastT = t;
+  } else { B.pend.push({ t, rec }); return; }                                  // unknown start: wait for a time stamp later in this power-on
+  c.recs.push(rec);
 }
 function handleLine(line) {
   blog('← ' + (line.length > 90 ? line.slice(0, 90) + '…' : line));
@@ -317,9 +336,11 @@ function handleLine(line) {
     const g = k => { const m = new RegExp('\\b' + k + '=(\\d+)').exec(line); return m ? +m[1] : null; };
     const code = (/SK-[0-9A-Z]{8}/.exec(line) || [''])[0], fw = (/fw[0-9.]+/.exec(line) || [''])[0];
     if (!/ p2 /.test(line + ' ')) { B.info = { code, fw, old: true, at: Date.now() }; return; }
-    B.info = { code, fw, up: g('up'), every: g('every'), boot: g('boot'), first: g('first'), next: g('next'), mv: g('mv'), flash: g('flash'), at: Date.now() };
+    B.info = { code, fw, up: g('up'), every: g('every'), boot: g('boot'), first: g('first'), next: g('next'), mv: g('mv'), flash: g('flash'), at: Date.now(),
+               name: ((/\bname=(.*)$/.exec(line) || [])[1] || '').trim() || null };
     return;
   }
+  if (/^[NU] (ok|bad|locked)$/.test(line)) { B.svc = line; return; }     // answers to service commands
   if (line.startsWith('D ')) { const p = line.split(' '); B.chunk = { from: +p[1], count: +p[2], got: 0, recs: [], untimed: 0, done: false, lastT: null }; B.binLeft = +p[2] * 8; return; }
   if (line === 'E') { if (B.chunk) finishChunk(); return; }
   if (line.startsWith('L,') && B.info && !B.info.old) {
@@ -341,6 +362,8 @@ async function syncAll(opts = {}) {
   let refuse = opts.expect && B.info.code !== opts.expect ? `Bu buton (${B.info.code}) senin hesabına bağlı değil. Hesabın yalnızca kendi butonunla (${opts.expect}) çalışır.` : null;
   if (!refuse && opts.allow) { try { refuse = await opts.allow(B.info.code); } catch (e) { refuse = (typeof trErr === 'function' ? trErr(e) : String(e)); } }
   if (refuse) { blog('reddedildi: ' + B.info.code); const info = B.info; bleDisconnect(); B.info = null; B.live = null; refresh(); alert(refuse); B.refused = info.code; return false; }
+  { const m = getMeta(B.info.code); if (B.info.name && m.bleName !== B.info.name) { m.bleName = B.info.name; setMeta(B.info.code, m); } }
+  send('w' + Math.floor(Date.now() / 1000));   // leave a time stamp in the button (dates readings after a later restart)
   if (opts.infoOnly) { B.syncing = false; refresh(); return true; }
   const code = B.info.code, meta = getMeta(code);
   // the button has no clock: its readings count seconds since it was switched on ("boot"). At every sync we
@@ -351,7 +374,7 @@ async function syncAll(opts = {}) {
   let from = Math.max(meta.next || 0, B.info.first);
   if (restarted && B.info.boot < from) from = Math.max(B.info.boot, B.info.first);   // unsaved readings were lost in the restart: fetch the new ones
   if (restarted) blog('buton yeniden başlamış (boot ' + meta.boot.idx + ' → ' + B.info.boot + ')');
-  const startFrom = from, toFetch = Math.max(1, (B.info.next || 0) - from); B.progress = 0;
+  const startFrom = from, toFetch = Math.max(1, (B.info.next || 0) - from); B.progress = 0; B.pend = []; B.rawT = 0;
   for (let guard = 0; guard < 200; guard++) {
     B.chunk = null;
     await send('d' + from);
@@ -366,6 +389,8 @@ async function syncAll(opts = {}) {
     refresh();
     if (B.chunk.count < 4000) break;
   }
+  if (B.pend.length) blog(B.pend.length + ' okuma zamanlanamadı (zaman damgası yok)');
+  B.pend = [];
   meta.lastSync = Date.now(); meta.mv = B.info.mv || meta.mv; meta.fw = B.info.fw; setMeta(code, meta);
   B.syncing = false;
   await computeDays(code, 14, true);
@@ -1704,7 +1729,12 @@ if (SRV.on) {
         <div class="li"><span class="k">Yazılım</span><span class="v">${esc(o.scan.fw || '–')}</span></div>
         <div class="li"><span class="k">Pil</span><span class="v">${o.scan.mv ? (o.scan.mv / 1000).toFixed(2) + ' V' + (o.scan.mv < 2750 ? ' (az)' : '') : '–'}</span></div>
         <div class="li"><span class="k">Hafıza</span><span class="v">${o.scan.flash === 1 ? 'çalışıyor' : 'sorun var'}</span></div>
-      </div>` : ''}
+        <div class="li"><span class="k">Bluetooth adı</span><span class="v">${esc(o.scan.name || o.scan.code)}</span></div>
+      </div>
+      ${fwAtLeast(o.scan.fw, 0, 7) ? `<label class="f" style="margin-top:10px">Yeni Bluetooth adı<input class="in" id="bname" maxlength="20" placeholder="SkoliData 1" value="${esc(o.scan.name && o.scan.name !== o.scan.code ? o.scan.name : '')}"></label>
+      <label class="f" style="margin-top:8px">Servis PIN'i<input class="in" id="spin" type="password" inputmode="numeric" autocomplete="off"></label>
+      <div class="grid2" style="margin-top:10px"><button class="btn secondary" data-act="ownerSetName">Adı kaydet</button><button class="btn secondary" data-act="ownerDfu">Kablosuz güncelleme</button></div>
+      <p class="help">Servis PIN'i buton yazılımında yazılı; uygulamada saklanmaz. 5 yanlış PIN'den sonra buton bu komutları yeniden başlatılana kadar kabul etmez.</p>` : `<p class="help" style="margin-top:8px">Ad verme ve kablosuz güncelleme için buton yazılımı en az fw0.7 olmalı.</p>`}` : ''}
     </section>
     <section class="card list"><div class="li"><span class="k">Aileler ve butonları</span><span class="v">${o.families.length}</span></div>
       ${o.families.map(famRow).join('') || '<p class="small">Henüz aile yok.</p>'}
@@ -1789,10 +1819,36 @@ if (SRV.on) {
     bleDisconnect(); B.info = null; B.live = null;
     try {
       const family = await SRV.rpc('owner_register_button', { p_code: i.code, p_fw: i.fw || null, p_mv: i.mv || null });
-      SRV.owner.scan = { code: i.code, fw: i.fw, mv: i.mv, flash: i.flash, family };
+      SRV.owner.scan = { code: i.code, fw: i.fw, mv: i.mv, flash: i.flash, family, name: i.name };
       await SRV.loadOwner();
       render(); toast(family ? `${i.code} şu ailede: ${family}` : `${i.code} eklendi (boşta).`);
     } catch (e) { toast(trErr(e)); }
+  };
+  // service commands (need the PIN; the button answers "N ok" / "U ok" / "... bad" / "... locked")
+  async function ownerService(cmd) {
+    const sc = SRV.owner.scan; if (!sc) return null;
+    const ok = await bleConnect({ expect: sc.code, infoOnly: true }); if (!ok) return null;
+    B.svc = null; await send(cmd); await waitFor(() => B.svc, 5000);
+    const r = B.svc; return r;
+  }
+  const svcErr = r => !r ? 'Buton yanıt vermedi.' : /locked/.test(r) ? 'Çok fazla yanlış PIN. Butonu yeniden başlat (pili çıkarıp tak), sonra tekrar dene.' : 'PIN ya da ad hatalı.';
+  ACTIONS.ownerSetName = async () => {
+    const nm = $('#bname').value.trim(), pin = $('#spin').value.trim(), sc = SRV.owner.scan;
+    if (!nm || new TextEncoder().encode(nm).length > 20) { toast('Ad 1–20 karakter olmalı.'); return; }
+    if (!/^\d{4,8}$/.test(pin)) { toast("Servis PIN'ini yaz."); return; }
+    const r = await ownerService('n' + pin + ':' + nm);
+    bleDisconnect(); B.info = null; B.live = null;
+    if (r === 'N ok') { sc.name = nm; const m = getMeta(sc.code); m.bleName = nm; setMeta(sc.code, m); render(); toast(`Ad kaydedildi: ${nm}. Telefonlar bir sonraki taramada bu adı görür.`); }
+    else toast(svcErr(r));
+  };
+  ACTIONS.ownerDfu = async () => {
+    const pin = $('#spin').value.trim(), sc = SRV.owner.scan;
+    if (!/^\d{4,8}$/.test(pin)) { toast("Servis PIN'ini yaz."); return; }
+    if (!confirm(`${sc.name || sc.code} kablosuz güncelleme moduna alınsın mı?\n\nButon ölçüm kaydetmeyi bırakır ve yeni yazılımı bekler. Hafızadaki ölçümler silinmez.\n\nGüncellemeyi hemen yap: telefondaki DFU güncelleme uygulamasıyla (yazılım paketindeki README'de yazıyor) "DFU" geçen cihaza bağlan ve .zip güncelleme dosyasını seç. Güncelleme yapmazsan pili çıkarıp takınca buton eski yazılımla normal çalışmaya döner.`)) return;
+    const r = await ownerService('u' + pin);
+    B.connected = false; B.info = null; B.live = null;
+    if (r === 'U ok') alert('Buton güncelleme modunda.\n\n1) Telefondaki DFU güncelleme uygulamasını aç (README'de yazıyor).\n2) Listede "DFU" geçen cihaza bağlan.\n3) DFU / Update deyip SkoliData_v0.7_wireless_update.zip (ya da yeni) dosyasını seç.\n4) Bitince buton kendiliğinden yeniden başlar; buraya dönüp "Butona bağlan" ile yazılım sürümünü kontrol et.\n\nVazgeçersen: pili çıkarıp tak.');
+    else { bleDisconnect(); toast(svcErr(r)); }
   };
   ACTIONS.ownerReadButton = async () => { const ok = await bleConnect({ infoOnly: true }); if (ok && B.info) { render(); toast('Buton: ' + B.info.code); } };
   ACTIONS.ownerHours = async () => {
