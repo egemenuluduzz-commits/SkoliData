@@ -66,6 +66,8 @@ input.in:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 4px rgba(3
 .stepper button{width:48px;height:48px;border-radius:24px;border:none;background:var(--pale);color:var(--deep);font:800 24px system-ui;cursor:pointer}
 .stepper b{font-size:26px;font-weight:800}
 .list{display:flex;flex-direction:column}
+a.li{text-decoration:none}
+main a:not(.li){color:#1E5EFF;text-decoration:none;font-weight:600}
 .li{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:10px 0;border-bottom:1px solid #EEF2F9;background:none;border-left:none;border-right:none;border-top:none;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
 .li:last-child{border-bottom:none}
 .li .k{font-weight:700}.li .v{color:var(--slate);font-weight:600;font-size:15px;text-align:right}
@@ -88,7 +90,11 @@ svg.chart{width:100%;height:auto;display:block}
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.6 · algo v1';
+const APP_VERSION = 'app v1.7 · algo v1';
+// contact (SkoliData – Egemen Uludüz)
+const CONTACT = { phone: '0 (538) 857 20 65', tel: '+905388572065', mail: 'egemenuluduzz@gmail.com' };
+const CONTACT_TXT = `Telefon: ${CONTACT.phone} · E-posta: ${CONTACT.mail}`;
+const CONTACT_HTML = `<a href="tel:${CONTACT.tel}">${CONTACT.phone}</a> · <a href="mailto:${CONTACT.mail}">${CONTACT.mail}</a>`;
 const SK_SVC = '508d0001-ade4-4fb4-9f46-45ea6a7e9c8f', SK_RX = '508d0002-ade4-4fb4-9f46-45ea6a7e9c8f', SK_TX = '508d0003-ade4-4fb4-9f46-45ea6a7e9c8f';   // SkoliData's own Bluetooth service
 // Clinician accounts: only a salted SHA-256 of the password is stored here (never the password itself).
 // NOTE: this is a front door for testing, not real security; real accounts need the server (master plan §6-7).
@@ -437,6 +443,7 @@ SCREENS.login = () => `<main>
   <div style="flex:1"></div>
   <button class="btn korsem" data-act="famStart">Korsem</button>
   <button class="btn klinisyen" data-act="go" data-arg="clinLogin">Klinisyen</button>
+  <p class="small center">Yardım: ${CONTACT_HTML}</p>
   <p class="small center">${APP_VERSION}</p>
 </main>`;
 
@@ -464,7 +471,7 @@ const CONSENT_TEXT = `<p><b>Ne kaydedilir?</b> Korsendeki buton, korsenin iç y�
 <p><b>Kim görür?</b> Sen. Bir klinisyenle paylaşırsan o klinisyen de görür. Bu sürümde veriler yalnızca bu telefonda saklanır.</p>
 <p><b>Amaç:</b> Korse kullanım süresini ölçen bir araştırma çalışması.</p>
 <p><b>Süre:</b> Çalışma boyunca (süreyi çalışma ekibi bildirir).</p>
-<p><b>İletişim:</b> SkoliData çalışma ekibi (iletişim bilgisi eklenecek).</p>
+<p><b>İletişim:</b> SkoliData çalışma ekibi – Egemen Uludüz · ${CONTACT_HTML}</p>
 <p><b>Hakların:</b> İstediğin zaman çalışmadan çekilebilir ve verilerinin silinmesini isteyebilirsin.</p>`;
 SCREENS.famConsent = p => `<main>${backBtn('famConnect')}
   <div class="steps"><i class="on"></i><i class="on"></i><i></i><i></i></div>
@@ -588,7 +595,7 @@ SCREENS.famHome = () => {
   const goalNote = p.goalNote && Date.now() - p.goalNote.at < 3 * 864e5 ? `<div class="note"><b>Yeni günlük hedefin: ${p.goalNote.to} saat</b>Klinisyenin günlük hedefini ${p.goalNote.from} saatten ${p.goalNote.to} saate değiştirdi. Bu not 3 gün içinde kaybolacak.</div>` : '';
   const calNote = !model ? `<div class="note"><b>Kalibrasyon önerilir</b>10 dakikalık kalibrasyonla saatler senin korsene göre daha doğru hesaplanır. <button class="btn text" style="min-height:36px;padding:0" data-act="calOpen" data-arg="family">Şimdi yap</button></div>` : '';
   const unevenNote = sm.uneven ? `<div class="note">Bu hafta günlerin biraz inişli çıkışlı. Her gün benzer sürede takmayı dene.</div>` : '';
-  const bat = battery(code), batNote = bat.low ? `<div class="note"><b>Pil</b>${esc(bat.txt)}</div>` : '';
+  const bat = battery(code), batNote = bat.low ? `<div class="note"><b>Pil</b>${esc(bat.txt)}<br>${CONTACT_HTML}</div>` : '';
   const d = new Date();
   return `<main>
   <header class="row" style="align-items:flex-end">
@@ -660,7 +667,8 @@ SCREENS.famSettings = () => {
   </section>
   <section class="card list">
     <button class="li" data-act="showConsent"><span class="k">Gizlilik ve onay</span><span class="v">›</span></button>
-    <div class="li"><span class="k">İletişim</span><span class="v">SkoliData ekibi</span></div>
+    <a class="li" href="tel:${CONTACT.tel}"><span class="k">Telefon</span><span class="v">${CONTACT.phone}</span></a>
+    <a class="li" href="mailto:${CONTACT.mail}"><span class="k">E-posta</span><span class="v">${CONTACT.mail}</span></a>
     <div class="li"><span class="k">Sürüm</span><span class="v">${APP_VERSION}</span></div>
   </section>
   <button class="btn secondary" data-act="logout">Çıkış yap</button>
@@ -828,7 +836,7 @@ const ACTIONS = {
     if (await sha256hex(P[code].pwSalt + ':' + (P[code].acct || code) + ':' + pw) !== P[code].pwHash) { $('#err').textContent = 'Şifre hatalı.'; return; }
     session = { role: 'family', code }; ssSet('sk.session', session); go('famHome');
   },
-  forgot: () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş.'),
+  forgot: () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş.\n\n' + CONTACT_TXT),
   // change button: warning 1 (dialog) -> warning 2 (screen + password) -> account without a button
   famResetStart: () => {
     if (!confirm(`Butonunu değiştirmek istiyor musun?\n\nHesabın ${session.code} butonundan ayrılacak ve yeni bir buton bağlayana kadar saatlerin kaydedilmeyecek.`)) return;
@@ -923,7 +931,7 @@ window.SRV_ON = SRV.on;
 const newFamilyEmail = () => 'f-' + randHex(8) + '@aile.skolidata.app';
 // temporary password for owner resets: 10 characters, no look-alikes (0/O, 1/I/L), easy to read out on the phone
 function tempPassword() { const A = '23456789ABCDEFGHJKMNPQRSTUVWXYZ', r = crypto.getRandomValues(new Uint8Array(10)); const t = [...r].map(x => A[x % A.length]).join(''); return t.slice(0, 5) + '-' + t.slice(5); }
-const TAKEN_MSG = 'Bu buton başka bir hesaba bağlı. Kendi hesabınsa "Giriş yap"ı kullan. Buton sana yeni verildiyse, önceki kullanıcının ya da klinisyeninin butonu serbest bırakması gerekir (SkoliData da yardımcı olabilir).';
+const TAKEN_MSG = 'Bu buton başka bir hesaba bağlı. Kendi hesabınsa "Giriş yap"ı kullan. Buton sana yeni verildiyse, önceki kullanıcının ya da klinisyeninin butonu serbest bırakması gerekir. SkoliData da yardımcı olabilir: ' + CONTACT_TXT;
 const CITIES = ['Adana','Adıyaman','Afyonkarahisar','Ağrı','Aksaray','Amasya','Ankara','Antalya','Ardahan','Artvin','Aydın','Balıkesir','Bartın','Batman','Bayburt','Bilecik','Bingöl','Bitlis','Bolu','Burdur','Bursa','Çanakkale','Çankırı','Çorum','Denizli','Diyarbakır','Düzce','Edirne','Elazığ','Erzincan','Erzurum','Eskişehir','Gaziantep','Giresun','Gümüşhane','Hakkâri','Hatay','Iğdır','Isparta','İstanbul','İzmir','Kahramanmaraş','Karabük','Karaman','Kars','Kastamonu','Kayseri','Kilis','Kırıkkale','Kırklareli','Kırşehir','Kocaeli','Konya','Kütahya','Malatya','Manisa','Mardin','Mersin','Muğla','Muş','Nevşehir','Niğde','Ordu','Osmaniye','Rize','Sakarya','Samsun','Şanlıurfa','Siirt','Sinop','Sivas','Şırnak','Tekirdağ','Tokat','Trabzon','Tunceli','Uşak','Van','Yalova','Yozgat','Zonguldak'];
 const ERR_TR = { password_short: 'Şifre en az 8 karakter olmalı.', password_long: 'Şifre en fazla 72 karakter olabilir.', button_taken: 'Bu buton başka bir hesaba bağlı.', has_button: 'Bu hesabın zaten bir butonu var.', code_invalid: 'Buton kodu geçersiz.', not_family: 'Bu bir aile hesabı değil.',
   already_registered: 'Bu hesap zaten kayıtlı.', clinician_not_found: 'Bu klinisyen kodu bulunamadı.', not_approved: 'Hesabınız henüz onaylanmadı.',
@@ -1085,6 +1093,7 @@ if (SRV.on) {
     <button class="btn primary" data-act="famLoginBtn">Giriş yap</button>
     <button class="btn text" data-act="famLoginScan" style="align-self:center">Başka bir buton</button>`
     : `<p class="sub">Korsendeki butonu telefona yaklaştır ve bağlan. Kod yazman gerekmez.</p>
+    <p class="small">Butonun yanında değilse ya da kaybolduysa bize ulaş: ${CONTACT_HTML}</p>
     <p class="err" id="err"></p>
     ${B.syncing ? `<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>` : ''}
     <button class="btn primary" data-act="famLoginScan" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>`}
@@ -1250,7 +1259,7 @@ if (SRV.on) {
     await SRV.signOut(); session = null; ssSet('sk.session', null); go('login'); toast('Hesabın silindi.');
   };
   ACTIONS.logout = async () => { await SRV.signOut(); session = null; ssSet('sk.session', null); go('login'); };
-  ACTIONS.forgot = () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş; kimliğini doğruladıktan sonra sana geçici bir şifre veririz. İlk girişte kendi yeni şifreni belirlersin.');
+  ACTIONS.forgot = () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş; kimliğini doğruladıktan sonra sana geçici bir şifre veririz. İlk girişte kendi yeni şifreni belirlersin.\n\n' + CONTACT_TXT);
 
   // ---------- password: change own (any role); required after an owner reset ----------
   SCREENS.pwChange = p => `<main>${p.forced ? '' : backBtn(p.back || 'login')}
@@ -1301,6 +1310,7 @@ if (SRV.on) {
     <div class="mark" aria-hidden="true"><span></span></div>
     <h1 class="center">Onay bekleniyor</h1>
     <p class="sub center">Hesabınız oluşturuldu. SkoliData ekibi onayladığında hastalarınızı görebilir ve klinisyen kodunuzu ailelere verebilirsiniz.</p>
+    <p class="small center">Hızlı onay için: ${CONTACT_HTML}</p>
     <div style="flex:1"></div>
     <button class="btn primary" data-act="clinRecheck">Yeniden kontrol et</button>
     <button class="btn secondary" data-act="logout">Çıkış</button></main>`;
