@@ -90,7 +90,10 @@ svg.chart{width:100%;height:auto;display:block}
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.7 · algo v1';
+const APP_VERSION = 'app v1.8 · algo v1';
+// name + surname of the person who wears the brace (so the team can tell families apart)
+const nameOk = n => (n || '').trim().split(/\s+/).filter(w => w.length >= 2).length >= 2;
+const NAME_MSG = 'Ad ve soyadı yaz (örnek: Elif Yılmaz).';
 // contact (SkoliData – Egemen Uludüz)
 const CONTACT = { phone: '0 (538) 857 20 65', tel: '+905388572065', mail: 'egemenuluduzz@gmail.com' };
 const CONTACT_TXT = `Telefon: ${CONTACT.phone} · E-posta: ${CONTACT.mail}`;
@@ -1068,6 +1071,7 @@ async function routeAfterLogin() {
   const p = SRV.profile;
   if (!p) return go('login');
   if (p.must_change_password) return go('pwChange', { forced: true });
+  if (p.role === 'family' && !nameOk(p.display_name)) return go('famName');
   if (p.role === 'family') { session = { role: 'family', code: p.button_code || null }; ssSet('sk.session', session); await SRV.pullFamily(true); return go('famHome'); }
   session = { role: p.role === 'owner' ? 'owner' : 'clinician', u: SRV.user.email }; ssSet('sk.session', session);
   if (p.role === 'owner') { await SRV.loadOwner(); return go('owner'); }
@@ -1077,7 +1081,7 @@ async function routeAfterLogin() {
 
 if (SRV.on) {
   const CONSENT_SRV = CONSENT_TEXT.replace('Bu sürümde veriler yalnızca bu telefonda saklanır.',
-    'Günlük saatler ve butonun ölçümleri (korse içi sıcaklık ve nem) SkoliData sunucusunda, Avrupa Birliği\'nde (Almanya) saklanır; bu yurt dışına aktarım için açık rızan istenir. Böylece hesabına giren diğer cihazlar ve saatlerini paylaştığın klinisyen de görebilir. SkoliData çalışma ekibi çalışma ve destek amacıyla görebilir; her erişim kayıt altına alınır.');
+    'Adın soyadın, şehrin, günlük saatler ve butonun ölçümleri (korse içi sıcaklık ve nem) SkoliData sunucusunda, Avrupa Birliği\'nde (Almanya) saklanır; bu yurt dışına aktarım için açık rızan istenir. Böylece hesabına giren diğer cihazlar ve saatlerini paylaştığın klinisyen de görebilir. SkoliData çalışma ekibi çalışma ve destek amacıyla görebilir; her erişim kayıt altına alınır.');
   const cityOptions = sel => '<option value="">Şehir seç</option>' + CITIES.map(c => `<option${c === sel ? ' selected' : ''}>${c}</option>`).join('');
 
   // ---------- family ----------
@@ -1124,6 +1128,8 @@ if (SRV.on) {
   SCREENS.famConsent = p => `<main>${backBtn('famConnect')}
     <div class="steps"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
     <h1>Onay</h1>
+    <label class="f">Korseyi kullananın adı soyadı<input class="in" id="fname" autocomplete="name" maxlength="60" placeholder="Örn. Elif Yılmaz" value="${esc(p.name || '')}"></label>
+    <p class="small" style="margin-top:-4px">Klinisyenin ve SkoliData ekibi seni bu isimle görür.</p>
     <label class="f">Yaşadığın şehir<select class="in" id="city">${cityOptions(p.city)}</select></label>
     <section class="card" style="display:flex;flex-direction:column;gap:10px;font-size:15px">${CONSENT_SRV}</section>
     <label class="check"><input type="checkbox" id="ok1">Okudum. Korse sürelerimin kaydedilmesini ve yukarıdaki şekilde saklanmasını onaylıyorum.</label>
@@ -1141,7 +1147,7 @@ if (SRV.on) {
     const extra = `<section class="card list"><div class="li"><span class="k">Klinisyenim</span><span></span></div>
       ${cl || '<p class="small">Henüz bir klinisyenle paylaşmıyorsun.</p>'}
       <label class="f" style="margin-top:10px">Klinisyen kodu<input class="in" id="ccode" placeholder="DR-XXXXXX" autocapitalize="characters"></label>
-      <label class="f" style="margin-top:8px">Klinisyen seni hangi isimle görsün?<input class="in" id="dname" placeholder="Örn. Elif Y." value="${esc((SRV.profile && SRV.profile.display_name) || '')}"></label>
+      <label class="f" style="margin-top:8px">Adın soyadın<input class="in" id="dname" placeholder="Örn. Elif Yılmaz" value="${esc((SRV.profile && SRV.profile.display_name) || '')}"></label>
       <button class="btn secondary" data-act="famLink" style="margin-top:10px">Klinisyenle paylaş</button></section>`;
     return html.replace('<section class="card list">\n    <button class="li" data-act="showConsent">', extra + '\n  <section class="card list">\n    <button class="li" data-act="pwOpen" data-arg="famSettings"><span class="k">Şifreyi değiştir</span><span class="v">›</span></button>\n    <button class="li" data-act="showConsent">');
   };
@@ -1159,8 +1165,10 @@ if (SRV.on) {
     params.password = a; go('famConsent', params);
   };
   ACTIONS.famConsentSave = () => {
-    const city = $('#city').value;
-    if (!city) { toast('Şehrini seç.'); return; }
+    const city = $('#city').value, name = $('#fname').value.trim().replace(/\s+/g, ' ');
+    if (!nameOk(name)) { params.city = city; toast(NAME_MSG); $('#fname').focus(); return; }
+    if (!city) { params.name = name; toast('Şehrini seç.'); return; }
+    params.name = name;
     if (!$('#ok1').checked || !$('#ok2').checked) { toast('Devam etmek için iki kutuyu da işaretle.'); return; }
     params.city = city; params.consentAt = Date.now(); go('famGoal', params);
   };
@@ -1169,8 +1177,9 @@ if (SRV.on) {
     busy(true);
     try {
       if (!SRV.user || SRV.profile) { if (SRV.profile) await SRV.signOut(); await SRV.signUp(newFamilyEmail(), params.password); }
-      try { await SRV.rpc('claim_button', { p_code: code, p_city: params.city, p_goal: goal, p_consent_version: 'v3-taslak' }); }
+      try { await SRV.rpc('claim_button', { p_code: code, p_city: params.city, p_goal: goal, p_consent_version: 'v4-taslak' }); }
       catch (e) { try { await SRV.rpc('delete_my_account'); } catch (x) {} await SRV.signOut(); throw e; }   // don't leave an empty login behind
+      try { await SRV.rpc('update_my_profile', { p_display_name: params.name, p_city: params.city }); } catch (e) {}   // asked again at next login if this failed
       await SRV.loadMe();
       const P = profiles(); P[code] = { goal, goalHistory: [{ to: goal, by: 'family', at: Date.now() }], createdAt: Date.now(), consentAt: params.consentAt, server: true }; saveProfiles(P);
       const m = getMeta(code); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(code, m);
@@ -1238,10 +1247,11 @@ if (SRV.on) {
     try { await SRV.rpc('set_goal', { p_family: SRV.user.id, p_goal: to }); await SRV.pullFamily(true); render(); } catch (e) { toast(trErr(e)); }
   };
   ACTIONS.famLink = async () => {
-    const code = $('#ccode').value.trim(), name = $('#dname').value.trim();
+    const code = $('#ccode').value.trim(), name = $('#dname').value.trim().replace(/\s+/g, ' ');
+    if (!nameOk(name)) { toast(NAME_MSG); return; }
     busy(true);
     try {
-      if (name !== ((SRV.profile && SRV.profile.display_name) || '')) await SRV.rpc('update_my_profile', { p_display_name: name || null, p_city: SRV.profile.city });
+      if (name !== ((SRV.profile && SRV.profile.display_name) || '')) await SRV.rpc('update_my_profile', { p_display_name: name, p_city: SRV.profile.city });
       if (code) { const n = await SRV.rpc('link_clinician', { p_code: code }); if (!confirm(`Saatlerini ${n} ile paylaşmak istiyor musun?`)) { const c = (await SRV.rpc('my_clinicians')).find(x => x.name === n); if (c) await SRV.rpc('unlink_clinician', { p_clinician: c.clinician_id }); } }
       await SRV.pullFamily(true); render(); toast('Kaydedildi.');
     } catch (e) { toast(trErr(e)); } finally { busy(false); }
@@ -1262,6 +1272,20 @@ if (SRV.on) {
   ACTIONS.forgot = () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş; kimliğini doğruladıktan sonra sana geçici bir şifre veririz. İlk girişte kendi yeni şifreni belirlersin.\n\n' + CONTACT_TXT);
 
   // ---------- password: change own (any role); required after an owner reset ----------
+  SCREENS.famName = () => `<main>
+    <h1>Adın soyadın</h1>
+    <p class="sub">Klinisyenin ve SkoliData ekibi seni bu isimle görür. Bir kez sorulur; Ayarlar'dan değiştirebilirsin.</p>
+    <label class="f">Korseyi kullananın adı soyadı<input class="in" id="fname" autocomplete="name" maxlength="60" placeholder="Örn. Elif Yılmaz" value="${esc((SRV.profile && SRV.profile.display_name) || '')}"></label>
+    <p class="err" id="err"></p><div style="flex:1"></div>
+    <button class="btn primary" data-act="famNameSave">Kaydet</button>
+  </main>`;
+  ACTIONS.famNameSave = async () => {
+    const name = $('#fname').value.trim().replace(/\s+/g, ' ');
+    if (!nameOk(name)) { $('#err').textContent = NAME_MSG; return; }
+    busy(true);
+    try { await SRV.rpc('update_my_profile', { p_display_name: name, p_city: SRV.profile.city }); await SRV.loadMe(); await routeAfterLogin(); }
+    catch (e) { $('#err').textContent = trErr(e); } finally { busy(false); }
+  };
   SCREENS.pwChange = p => `<main>${p.forced ? '' : backBtn(p.back || 'login')}
     <h1>${p.forced ? 'Yeni şifre belirle' : 'Şifreyi değiştir'}</h1>
     ${p.forced ? '<p class="sub">Şifren SkoliData tarafından sıfırlandı. Devam etmek için kendine yeni bir şifre belirle. Bu şifreyi kimse bilmeyecek.</p>' : `<label class="f">Şu anki şifre<input class="in" id="pc" type="password" autocomplete="current-password"></label>`}
