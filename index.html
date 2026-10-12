@@ -97,7 +97,11 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.9 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.10 · algo ' + SkoliAlgo.INFO.id;
+// clinician accounts made by SkoliData use a user name; behind the scenes it is <name>@klinisyen.skolidata.app (no mail is ever sent)
+const CLIN_DOMAIN = '@klinisyen.skolidata.app';
+const clinLoginEmail = u => { u = (u || '').trim().toLowerCase(); return u.includes('@') ? u : u + CLIN_DOMAIN; };
+const showLogin = e => (e || '').endsWith(CLIN_DOMAIN) ? 'kullanıcı adı ' + e.slice(0, -CLIN_DOMAIN.length) : e;
 // name + surname of the person who wears the brace (so the team can tell families apart)
 const nameOk = n => (n || '').trim().split(/\s+/).filter(w => w.length >= 2).length >= 2;
 const NAME_MSG = 'Ad ve soyadı yaz (örnek: Elif Yılmaz).';
@@ -796,7 +800,7 @@ SCREENS.raw = p => {
   <section class="card"><b>Bluetooth günlüğü</b><pre class="log">${esc(APP_VERSION + '\n' + B.log.join('\n'))}</pre></section>
 </main>`;
 };
-const CHART_LEGEND = '<p class="legend">Mavi çizgi: ten tarafı · gri çizgi: kapak (çip) · mavi alan: algoritmaya göre takılı · gri alan: emin değil · kesikli çizgiler: eşikler</p>';
+const CHART_LEGEND = '<p class="legend">Mavi çizgi: ten tarafı · mavi alan: algoritmaya göre takılı · gri alan: emin değil · kesikli çizgiler: eşikler</p>';
 const RAWCHART = { key: null, html: '', at: 0 };
 SCREENS.raw.after = async p => {
   const range = p.range || 6, key = p.code + '|' + range;
@@ -805,7 +809,7 @@ SCREENS.raw.after = async p => {
   const t1 = Date.now(), t0 = t1 - range * 3.6e6;
   const recs = await getRecsAny(p.code, t0, t1 + 60e3, p.fid);
   const el = $('#rawChart'); if (!el || screen !== 'raw') return;
-  RAWCHART.html = el.innerHTML = rawChartSvg(recs, modelFor(p.code), t0, t1, { chip: true, h: 170 });
+  RAWCHART.html = el.innerHTML = rawChartSvg(recs, modelFor(p.code), t0, t1, { h: 170 });
 };
 
 // ---------- chart: temperature + what the algorithm decided + its lines (any algorithm: uses overlays/classify only) ----------
@@ -854,7 +858,7 @@ function liveInner(code) {
     <div class="stat"><span>Nem</span><b>${r.rh !== null ? Math.round(r.rh) + ' %' : '–'}</b></div>
     <div class="stat"><span>Kapak (çip)</span><b>${isFinite(r.chip) ? r.chip.toFixed(1) + ' °C' : '–'}</b></div>
     <div class="stat"><span>Algoritma şu an</span><b>${st}</b></div></div>
-    ${buf.length >= 2 ? `<div style="margin-top:8px">${rawChartSvg(buf, model, Date.now() - 10 * 60e3, Date.now(), { h: 110, chip: true, label: 'Son 10 dakika' })}</div><p class="legend">Son 10 dakika, her 2 saniyede bir.</p>` : ''}`;
+    ${buf.length >= 2 ? `<div style="margin-top:8px">${rawChartSvg(buf, model, Date.now() - 10 * 60e3, Date.now(), { h: 110, label: 'Son 10 dakika' })}</div><p class="legend">Son 10 dakika, her 2 saniyede bir.</p>` : ''}`;
 }
 function liveSection(code, always) {
   const on = always || showLive();
@@ -934,7 +938,7 @@ async function calPreview() {
   const da = perDay(a), db = perDay(b), days = Object.keys(da).sort();
   const table = days.length ? `<table class="cmp"><tr><th>Gün</th><th>Veri</th><th>Şu an</th>${b ? '<th>Yeni ayarla</th>' : ''}</tr>${days.map(k => `<tr><td>${fmtDate(Date.parse(k + 'T12:00:00'))}</td><td>${fmtH1(da[k].data)} sa</td><td>${fmtH1(da[k].on)} sa${da[k].un > 6e4 ? ` <span class="small">(+${fmtH1(da[k].un)} emin değil)</span>` : ''}</td>${b ? `<td><b>${fmtH1((db[k] || {}).on || 0)} sa</b>${(db[k] || {}).un > 6e4 ? ` <span class="small">(+${fmtH1(db[k].un)} emin değil)</span>` : ''}</td>` : ''}</tr>`).join('')}</table>
     <p class="legend">Saatler sadece bu cihazın gördüğü ölçümlerden hesaplanır (bu aralıktaki ham veri).</p>` : '';
-  el.innerHTML = rawChartSvg(recs, show, t0, t1, { chip: true, h: 170, compare: res.model ? cur : null, result: res.model ? b : a }) + (res.model ? '<p class="legend">Mavi çizgiler: yeni eşikler · gri kesikli: şimdiki eşikler. Mavi alan yeni ayara göre.</p>' : '') + table;
+  el.innerHTML = rawChartSvg(recs, show, t0, t1, { h: 170, compare: res.model ? cur : null, result: res.model ? b : a }) + (res.model ? '<p class="legend">Mavi çizgiler: yeni eşikler · gri kesikli: şimdiki eşikler. Mavi alan yeni ayara göre.</p>' : '') + table;
 }
 
 // ================= actions =================
@@ -1210,6 +1214,7 @@ SRV.pullFamily = async (force) => {
     if (B.connected && B.info && B.info.code !== code) { bleDisconnect(); B.info = null; B.live = null; }
   }
   SRV.clinicians = await SRV.rpc('my_clinicians');
+  try { SRV.doctors = await SRV.rpc('list_clinicians'); } catch (e) { SRV.doctors = SRV.doctors || []; }
   if (!code) return true;
   const P = profiles(), p = P[code] || (P[code] = { createdAt: Date.now() });
   p.goal = SRV.profile.goal_h;
@@ -1262,7 +1267,7 @@ SRV.loadOwner = async () => {
 async function routeAfterLogin() {
   const p = SRV.profile;
   if (!p) return go('login');
-  if (p.must_change_password) return go('pwChange', { forced: true });
+  if (p.must_change_password && p.role === 'family') return go('pwChange', { forced: true });   // clinicians see a banner instead
   if (p.role === 'family' && !nameOk(p.display_name)) return go('famName');
   if (p.role === 'family') { session = { role: 'family', code: p.button_code || null }; ssSet('sk.session', session); await SRV.pullFamily(true); return go('famHome'); }
   session = { role: p.role === 'owner' ? 'owner' : 'clinician', u: SRV.user.email }; ssSet('sk.session', session);
@@ -1335,15 +1340,42 @@ if (SRV.on) {
   const baseSettings = SCREENS.famSettings;
   SCREENS.famSettings = () => {
     const html = baseSettings();
-    const cl = SRV.clinicians.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${esc(c.code)} · ${fmtDate(Date.parse(c.since))}'den beri</span></span><button class="btn text" data-act="famUnlink" data-arg="${esc(c.clinician_id)}">Kaldır</button></div>`).join('');
-    const extra = `<section class="card list"><div class="li"><span class="k">Klinisyenim</span><span></span></div>
-      ${cl || '<p class="small">Henüz bir klinisyenle paylaşmıyorsun.</p>'}
-      <label class="f" style="margin-top:10px">Klinisyen kodu<input class="in" id="ccode" placeholder="DR-XXXXXX" autocapitalize="characters"></label>
+    const cl = SRV.clinicians.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${fmtDate(Date.parse(c.since))}'den beri saatlerini görüyor</span></span><button class="btn text" data-act="famUnlink" data-arg="${esc(c.clinician_id)}">Kaldır</button></div>`).join('');
+    const extra = `<section class="card list"><div class="li"><span class="k">Doktorum</span><span></span></div>
+      ${cl || '<p class="small">Henüz bir doktorla paylaşmıyorsun.</p>'}
+      ${doctorPicker('cdoc', SRV.clinicians.map(c => c.clinician_id))}
       <label class="f" style="margin-top:8px">Adın soyadın<input class="in" id="dname" placeholder="Örn. Elif Yılmaz" value="${esc((SRV.profile && SRV.profile.display_name) || '')}"></label>
-      <button class="btn secondary" data-act="famLink" style="margin-top:10px">Klinisyenle paylaş</button></section>`;
+      <button class="btn secondary" data-act="famLink" style="margin-top:10px">Kaydet</button></section>`;
     return html.replace('<section class="card list">\n    <button class="li" data-act="showConsent">', extra + '\n  <section class="card list">\n    <button class="li" data-act="pwOpen" data-arg="famSettings"><span class="k">Şifreyi değiştir</span><span class="v">›</span></button>\n    <button class="li" data-act="showConsent">');
   };
   ACTIONS.famStart = () => { if (session && session.role === 'family' && SRV.profile) return go('famHome'); go('famLogin'); };
+  // the list of doctors (approved clinicians); a family never types a code
+  function doctorPicker(id, exclude = []) {
+    const list = (SRV.doctors || []).filter(d => !exclude.includes(d.id));
+    if (!(SRV.doctors || []).length) return '<div class="note" style="margin-top:10px"><b>Doktor yok</b>Doktorlar yakında eklenecek.</div>';
+    if (!list.length) return '';
+    return `<label class="f" style="margin-top:10px">Doktorunu seç<select class="in" id="${id}"><option value="">Seçme (doktorum yok / listede yok)</option>${list.map(d => `<option value="${esc(d.id)}">${esc(d.name)}${d.city ? ' – ' + esc(d.city) : ''}</option>`).join('')}</select></label>`;
+  }
+  async function linkDoctor(id) {
+    const d = (SRV.doctors || []).find(x => x.id === id), n = d ? d.name : 'bu doktor';
+    if (!confirm(`Saatlerini ${n} ile paylaşmak istiyor musun?\n\nDoktorun korse saatlerini görebilir. İstediğin zaman Ayarlar'dan kaldırabilirsin.`)) return false;
+    await SRV.rpc('link_clinician_id', { p_clinician: id }); return true;
+  }
+  // sign-up: right after the account is made, the family picks its doctor from the list (or none)
+  SCREENS.famDoctor = () => `<main>
+    <div class="steps"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div>
+    <h1>Doktorun</h1>
+    <p class="sub">Korse saatlerini doktorunla paylaşabilirsin. Doktorun sadece saatleri görür. Sonra Ayarlar'dan değiştirebilirsin.</p>
+    ${doctorPicker('fdoc') || '<p class="small">Listede doktor yok.</p>'}
+    <div style="flex:1"></div>
+    <button class="btn primary" data-act="famDoctorSave">Devam</button>
+  </main>`;
+  ACTIONS.famDoctorSave = async () => {
+    const id = $('#fdoc') ? $('#fdoc').value : '';
+    busy(true);
+    try { if (id) await linkDoctor(id); await SRV.pullFamily(true).catch(() => {}); go('calib'); }
+    catch (e) { toast(trErr(e)); } finally { busy(false); }
+  };
   // sign-up: the connected button must be free; nothing is stored from a button that belongs to someone else
   ACTIONS.famConnectBtn = async () => {
     const ok = await bleConnect({ allow: async c => (await SRV.rpc('button_taken', { p_code: c })) ? TAKEN_MSG : null });
@@ -1378,7 +1410,8 @@ if (SRV.on) {
       session = { role: 'family', code }; ssSet('sk.session', session);
       try { await window.onSynced(code); } catch (e) {}
       params = {}; CAL.phase = null; CAL.code = code; CAL.by = 'family';
-      go('calib');
+      try { SRV.doctors = await SRV.rpc('list_clinicians'); } catch (e) { SRV.doctors = []; }
+      go('famDoctor');
     } catch (e) { alert(String(e.message || e).includes('button_taken') ? TAKEN_MSG : trErr(e)); } finally { busy(false); }
   };
   // login: button code -> the account(s) it may belong to; the password decides
@@ -1439,12 +1472,12 @@ if (SRV.on) {
     try { await SRV.rpc('set_goal', { p_family: SRV.user.id, p_goal: to }); await SRV.pullFamily(true); render(); } catch (e) { toast(trErr(e)); }
   };
   ACTIONS.famLink = async () => {
-    const code = $('#ccode').value.trim(), name = $('#dname').value.trim().replace(/\s+/g, ' ');
+    const doc = $('#cdoc') ? $('#cdoc').value : '', name = $('#dname').value.trim().replace(/\s+/g, ' ');
     if (!nameOk(name)) { toast(NAME_MSG); return; }
     busy(true);
     try {
       if (name !== ((SRV.profile && SRV.profile.display_name) || '')) await SRV.rpc('update_my_profile', { p_display_name: name, p_city: SRV.profile.city });
-      if (code) { const n = await SRV.rpc('link_clinician', { p_code: code }); if (!confirm(`Saatlerini ${n} ile paylaşmak istiyor musun?`)) { const c = (await SRV.rpc('my_clinicians')).find(x => x.name === n); if (c) await SRV.rpc('unlink_clinician', { p_clinician: c.clinician_id }); } }
+      if (doc) await linkDoctor(doc);
       await SRV.pullFamily(true); render(); toast('Kaydedildi.');
     } catch (e) { toast(trErr(e)); } finally { busy(false); }
   };
@@ -1461,7 +1494,7 @@ if (SRV.on) {
     await SRV.signOut(); session = null; ssSet('sk.session', null); go('login'); toast('Hesabın silindi.');
   };
   ACTIONS.logout = async () => { await SRV.signOut(); session = null; ssSet('sk.session', null); go('login'); };
-  ACTIONS.forgot = () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş; kimliğini doğruladıktan sonra sana geçici bir şifre veririz. İlk girişte kendi yeni şifreni belirlersin.\n\n' + CONTACT_TXT);
+  ACTIONS.forgot = () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş; kimliğini doğruladıktan sonra sana geçici bir şifre veririz. Giriş yapıp kendi yeni şifreni belirlersin.\n\n' + CONTACT_TXT);
 
   // ---------- password: change own (any role); required after an owner reset ----------
   SCREENS.famName = () => `<main>
@@ -1481,6 +1514,7 @@ if (SRV.on) {
   SCREENS.pwChange = p => `<main>${p.forced ? '' : backBtn(p.back || 'login')}
     <h1>${p.forced ? 'Yeni şifre belirle' : 'Şifreyi değiştir'}</h1>
     ${p.forced ? '<p class="sub">Şifren SkoliData tarafından sıfırlandı. Devam etmek için kendine yeni bir şifre belirle. Bu şifreyi kimse bilmeyecek.</p>' : `<label class="f">Şu anki şifre<input class="in" id="pc" type="password" autocomplete="current-password"></label>`}
+    <div class="note"><b>Parolan yöneticiyle asla paylaşılmaz</b>Parolanı sadece sen bilirsin. Sunucuda yalnızca geri çevrilemez şifrelenmiş hali tutulur; SkoliData dahil kimse göremez. Unutursan SkoliData sadece sıfırlayabilir.</div>
     <label class="f">Yeni şifre (en az 8 karakter)<input class="in" id="pn1" type="password" autocomplete="new-password"></label>
     <label class="f">Yeni şifre tekrar<input class="in" id="pn2" type="password" autocomplete="new-password"></label>
     <p class="err" id="err"></p><div style="flex:1"></div>
@@ -1504,7 +1538,7 @@ if (SRV.on) {
   // ---------- clinician ----------
   SCREENS.clinLogin = () => `<main>${backBtn('login')}
     <h1>Klinisyen girişi</h1>
-    <label class="f">E-posta<input class="in" id="cu" type="email" autocapitalize="none" autocomplete="username"></label>
+    <label class="f">Kullanıcı adı ya da e-posta<input class="in" id="cu" autocapitalize="none" autocomplete="username"></label>
     <label class="f">Şifre<input class="in" id="cp" type="password" autocomplete="current-password"></label>
     <p class="err" id="err"></p>
     <button class="btn primary" data-act="clinLoginBtn">Giriş yap</button>
@@ -1525,7 +1559,7 @@ if (SRV.on) {
   SCREENS.clinPending = () => `<main><div style="flex:1"></div>
     <div class="mark" aria-hidden="true"><span></span></div>
     <h1 class="center">Onay bekleniyor</h1>
-    <p class="sub center">Hesabınız oluşturuldu. SkoliData ekibi onayladığında hastalarınızı görebilir ve klinisyen kodunuzu ailelere verebilirsiniz.</p>
+    <p class="sub center">Hesabınız oluşturuldu. SkoliData ekibi onayladığında aileler sizi doktor listesinde görür ve sizi seçen ailelerin saatlerini görebilirsiniz.</p>
     <p class="small center">Hızlı onay için: ${CONTACT_HTML}</p>
     <div style="flex:1"></div>
     <button class="btn primary" data-act="clinRecheck">Yeniden kontrol et</button>
@@ -1533,14 +1567,15 @@ if (SRV.on) {
   const baseClinList = SCREENS.clinList;
   SCREENS.clinList = () => {
     const code = SRV.profile && SRV.profile.clinician_code;
-    const codeCard = code ? `<div class="note"><b>Klinisyen kodunuz: ${esc(code)}</b>Ailelere bu kodu verin. Aile uygulamada kodu girip onayladığında burada görünür.</div>` : '';
+    const codeCard = (SRV.profile && SRV.profile.must_change_password ? `<section class="card" style="border:2px solid var(--deep)"><b>Parolanı değiştir</b><p class="help" style="margin:6px 0 10px">Bu hesap sana SkoliData tarafından verilen ilk parolayla açıldı. Kendi parolanı belirle. Parolan yöneticiyle asla paylaşılmaz.</p><button class="btn primary" data-act="pwOpen" data-arg="clinList">Parolanı değiştir</button></section>` : '')
+      + `<div class="note"><b>Aileler sizi listeden seçer</b>Aileler uygulamadaki doktor listesinden sizi seçip onayladığında burada görünür.</div>`;
     return baseClinList().replace('<section class="card list">', codeCard + '<section class="card list">')
-      .replace('Bu telefonda henüz kayıtlı buton yok. Klinikte butonu bağlayarak başla.', 'Henüz sizinle paylaşan aile yok. Kodunuzu ailelere verin.')
+      .replace('Bu telefonda henüz kayıtlı buton yok. Klinikte butonu bağlayarak başla.', 'Henüz sizi seçen aile yok.')
       .replace('<p class="small">Bu sürümde yalnızca bu telefona senkronize edilen butonlar görünür. Sunucu bağlantısı sonraki adım.</p>', '<button class="btn text" data-act="clinRefresh" style="align-self:center">Yenile</button><button class="btn text" data-act="pwOpen" data-arg="clinList" style="align-self:center">Şifreyi değiştir</button>');
   };
   SCREENS.clinList.after = () => {};
   clinCodes = () => SRV.patients.map(pt => pt._key);
-  CLIN_ALLOW = async c => SRV.patients.some(pt => pt.button_code === c) ? null : 'Bu buton sizinle paylaşan bir aileye bağlı değil. Aile önce klinisyen kodunuzu girmeli.';
+  CLIN_ALLOW = async c => SRV.patients.some(pt => pt.button_code === c) ? null : 'Bu buton sizi seçen bir aileye bağlı değil. Aile önce sizi doktor listesinden seçmeli.';
   const baseClinPatient = SCREENS.clinPatient;
   SCREENS.clinPatient = p => {
     const d = SRV.detail[p.code];
@@ -1564,7 +1599,7 @@ if (SRV.on) {
   };
   SCREENS.clinPatient.after = p => { if (SRV.detail[p.code] === undefined || SRV.detail[p.code] === null) { SRV.detail[p.code] = false; SRV.loadDetail(p.code).then(refresh).catch(e => toast(trErr(e))); } };
   ACTIONS.clinLoginBtn = async () => {
-    const email = $('#cu').value.trim(), pw = $('#cp').value;
+    const email = clinLoginEmail($('#cu').value), pw = $('#cp').value;
     busy(true);
     try {
       const p = await SRV.signIn(email, pw);
@@ -1619,7 +1654,7 @@ if (SRV.on) {
     return `<main>
     <header class="row"><div><div class="sub">SkoliData yönetici</div><h1>Yönetim</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
     <section class="card list"><div class="li"><span class="k">Onay bekleyen klinisyenler</span><span class="v">${pending.length}</span></div>
-      ${pending.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${esc(c.email)} · ${esc(c.city || '')}</span></span><span style="display:flex;gap:4px"><button class="btn text" data-act="ownerApprove" data-arg="${c.id}">Onayla</button><button class="btn text" data-act="ownerReject" data-arg="${c.id}">Reddet</button></span></div>`).join('') || '<p class="small">Bekleyen yok.</p>'}
+      ${pending.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${esc(showLogin(c.email))} · ${esc(c.city || '')}</span></span><span style="display:flex;gap:4px"><button class="btn text" data-act="ownerApprove" data-arg="${c.id}">Onayla</button><button class="btn text" data-act="ownerReject" data-arg="${c.id}">Reddet</button></span></div>`).join('') || '<p class="small">Bekleyen yok.</p>'}
     </section>
     <section class="card"><b>Buton ekle / kontrol et</b><p class="small" style="margin:4px 0 8px">Yeni bir butonu sisteme ekle ya da elindeki butonun kimde olduğunu, yazılımını ve pilini gör. Butonun yanında ol.</p>
       <button class="btn primary" data-act="ownerScan">Butona bağlan</button>
@@ -1636,7 +1671,7 @@ if (SRV.on) {
       <p class="small">Bir aileye dokun: saatlerini gör, butonunu değiştir ya da ayır.</p>
     </section>
     <section class="card list"><div class="li"><span class="k">Klinisyenler</span><span class="v">${approved.length}</span></div>
-      ${approved.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${esc(c.code || '')} · ${c.patients} aile · ${esc(c.email)}</span></span><button class="btn text" data-act="ownerResetPw" data-arg="${c.id}">Şifre sıfırla</button></div>`).join('') || '<p class="small">Henüz yok.</p>'}
+      ${approved.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${esc(c.code || '')} · ${c.patients} aile · ${esc(showLogin(c.email))}</span></span><button class="btn text" data-act="ownerResetPw" data-arg="${c.id}">Şifre sıfırla</button></div>`).join('') || '<p class="small">Henüz yok.</p>'}
     </section>
     <section class="card list"><div class="li"><span class="k">Buton sağlığı</span><span class="v">${o.health.length}</span></div>${o.health.map(healthRow).join('') || '<p class="small">Henüz buton yok.</p>'}</section>
     <section class="card list"><div class="li"><span class="k">Şehirler</span><span class="v">aile · klinisyen</span></div>${o.cities.map(c => `<div class="li"><span class="k">${esc(c.city)}</span><span class="v">${c.families} · ${c.clinicians}</span></div>`).join('') || '<p class="small">Veri yok.</p>'}<p class="small">1–4 arası sayılar gizlilik için "1-4" gösterilir.</p></section>
@@ -1680,7 +1715,7 @@ if (SRV.on) {
     <p class="sub">${esc(p.who)}</p>
     <section class="card center" style="display:flex;flex-direction:column;align-items:center;gap:6px">
       <b id="tmpPw" style="font-size:30px;letter-spacing:.08em;user-select:all">${esc(p.pw)}</b>
-      <span class="small">${p.code ? 'Giriş: butona (' + esc(p.code) + ') bağlan + bu şifre' : p.email ? 'Giriş: ' + esc(p.email) + ' + bu şifre' : ''}</span></section>
+      <span class="small">${p.code ? 'Giriş: butona (' + esc(p.code) + ') bağlan + bu şifre' : p.email ? 'Giriş: ' + esc(showLogin(p.email)) + ' + bu şifre' : ''}</span></section>
     <div class="note"><b>Bir kez gösterilir</b>Bu şifreyi kişiye telefonda ya da yüz yüze söyle. İlk girişte kendi yeni şifresini belirlemesi istenecek. Şifre hiçbir yere kaydedilmez.</div>
     <div style="flex:1"></div>
     <button class="btn secondary" data-act="ownerPwCopy">Kopyala</button>
@@ -1688,7 +1723,7 @@ if (SRV.on) {
   </main>`;
   ACTIONS.ownerResetPw = async id => {
     const f = SRV.owner.families.find(x => x.id === id), c = SRV.owner.clinicians.find(x => x.id === id);
-    const who = f ? `${famName(f)}${f.button_code ? ' · ' + f.button_code : ''}` : c ? `${c.name} · ${c.email}` : '';
+    const who = f ? `${famName(f)}${f.button_code ? ' · ' + f.button_code : ''}` : c ? `${c.name} · ${showLogin(c.email)}` : '';
     if (!confirm(`Şifre sıfırlansın mı?\n\n${who}\n\nKimliğini doğruladın mı? Eski şifre hemen çalışmaz olur; sana yeni bir geçici şifre göstereceğim.`)) return;
     const pw = tempPassword(), back = { screen, params: Object.assign({}, params) };
     try {
