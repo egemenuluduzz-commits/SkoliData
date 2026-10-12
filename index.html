@@ -88,7 +88,7 @@ svg.chart{width:100%;height:auto;display:block}
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.3 · algo v1';
+const APP_VERSION = 'app v1.4 · algo v1';
 const SK_SVC = '508d0001-ade4-4fb4-9f46-45ea6a7e9c8f', SK_RX = '508d0002-ade4-4fb4-9f46-45ea6a7e9c8f', SK_TX = '508d0003-ade4-4fb4-9f46-45ea6a7e9c8f';   // SkoliData's own Bluetooth service
 // Clinician accounts: only a salted SHA-256 of the password is stored here (never the password itself).
 // NOTE: this is a front door for testing, not real security; real accounts need the server (master plan §6-7).
@@ -152,7 +152,10 @@ async function putRecs(list) {
   // readings arrived for these days -> their cached hours must be recomputed
   const byCode = {};
   list.forEach(r => { byCode[r.code] = Math.min(byCode[r.code] ?? Infinity, r.t); });
-  for (const c in byCode) { const k = dateKey(byCode[c]), cache = lsGet('sk.days.' + c, {}); for (const d in cache) if (d >= k) delete cache[d]; lsSet('sk.days.' + c, cache); }
+  for (const c in byCode) {
+    const k = dateKey(byCode[c]), cache = lsGet('sk.days.' + c, {}); for (const d in cache) if (d >= k) delete cache[d]; lsSet('sk.days.' + c, cache);
+    const rk = 'sk.rawdirty.' + c, cur = lsGet(rk, null); if (cur === null || byCode[c] < cur) lsSet(rk, byCode[c]);   // raw readings to upload (server mode)
+  }
 }
 async function getRecs(code, t0, t1) {
   const db = await idb();
@@ -163,6 +166,40 @@ async function deleteCode(code) {
   const db = await idb();
   if (!db) { memRecs = memRecs.filter(r => r.code !== code); return; }
   await new Promise((res) => { const tx = db.transaction('recs', 'readwrite'); tx.objectStore('recs').delete(IDBKeyRange.bound([code, 0], [code, Number.MAX_SAFE_INTEGER])); tx.oncomplete = res; tx.onerror = res; });
+}
+
+// ================= raw readings as one compact file per day (for the server) =================
+// JSON of differences (time s, skin x100, humidity x2, cover (x+20)x2), gzip + base64 when the browser can (~50 KB a day)
+const canGz = typeof CompressionStream !== 'undefined' && typeof DecompressionStream !== 'undefined';
+const b64enc = u8 => { let t = ''; for (let i = 0; i < u8.length; i += 0x8000) t += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(t); };
+const b64dec = str => Uint8Array.from(atob(str), ch => ch.charCodeAt(0));
+async function gzipBytes(u8, inflate) { const st = new Blob([u8]).stream().pipeThrough(inflate ? new DecompressionStream('gzip') : new CompressionStream('gzip')); return new Uint8Array(await new Response(st).arrayBuffer()); }
+function packDay(recs) {
+  const d = a => a.map((v, i) => i ? v - a[i - 1] : v);
+  return JSON.stringify({ v: 1, t: d(recs.map(r => Math.round(r.t / 1000))), s: d(recs.map(r => r.skin === null ? -32768 : Math.round(r.skin * 100))),
+    h: d(recs.map(r => r.rh === null ? 255 : Math.round(r.rh * 2))), c: d(recs.map(r => Math.round((r.chip + 20) * 2))) });
+}
+function unpackDay(json, code) {
+  const o = JSON.parse(json), u = a => { let x = 0; return a.map(v => (x += v)); };
+  const t = u(o.t), sk = u(o.s), h = u(o.h), c = u(o.c);
+  return t.map((tt, i) => ({ code, t: tt * 1000, skin: sk[i] === -32768 ? null : sk[i] / 100, rh: h[i] === 255 ? null : h[i] / 2, chip: c[i] / 2 - 20, remote: true }));
+}
+async function encodeDay(recs) { const json = packDay(recs); return canGz ? { enc: 'gz64', data: b64enc(await gzipBytes(new TextEncoder().encode(json))) } : { enc: 'json', data: json }; }
+async function decodeRawRow(row, code) { return unpackDay(row.enc === 'json' ? row.data : new TextDecoder().decode(await gzipBytes(b64dec(row.data), true)), code); }
+// readings for a time window: this device's own, filled in from the server where this device has none
+async function getRecsAny(code, t0, t1) {
+  const local = await getRecs(code, t0, t1);
+  if (!window.SRV_ON || !SRV.user || !SRV.profile) return local;
+  const P = profiles()[code] || {}, fid = SRV.profile.role === 'family' ? SRV.user.id : P.familyId;
+  if (!fid) return local;
+  try {
+    const rows = SRV.profile.role === 'owner'
+      ? await SRV.rpc('owner_raw_days', { p_family: fid, p_from: dateKey(t0), p_to: dateKey(t1) })
+      : await sv(SRV.sb.from('raw_days').select('*').eq('family_id', fid).gte('day', dateKey(t0)).lte('day', dateKey(t1)));
+    const have = new Set(local.map(r => Math.round(r.t / 1000))), extra = [];
+    for (const row of rows) for (const r of await decodeRawRow(row, code)) if (r.t >= t0 && r.t <= t1 && !have.has(Math.round(r.t / 1000))) extra.push(r);
+    return extra.length ? local.concat(extra).sort((a, b) => a.t - b.t) : local;
+  } catch (e) { blog('sunucu ham veri: ' + (e.message || e)); return local; }
 }
 
 // ================= Bluetooth (protocol 2) =================
@@ -733,7 +770,7 @@ const RAWCHART = { code: null, html: '', at: 0 };
 SCREENS.raw.after = async p => {
   if (RAWCHART.code === p.code && Date.now() - RAWCHART.at < 10000) return;   // redraw at most every 10 s
   RAWCHART.code = p.code; RAWCHART.at = Date.now();
-  const recs = (await getRecs(p.code, Date.now() - 6 * 3.6e6, Date.now() + 60e3)).filter(r => r.skin !== null);
+  const recs = (await getRecsAny(p.code, Date.now() - 6 * 3.6e6, Date.now() + 60e3)).filter(r => r.skin !== null);
   const el = $('#rawChart'); if (!el) return;
   if (recs.length < 2) { RAWCHART.html = el.innerHTML = '<p class="small">Veri yok.</p>'; return; }
   const model = modelFor(p.code), W = 340, H = 140, t0 = Date.now() - 6 * 3.6e6;
@@ -855,7 +892,8 @@ const ACTIONS = {
     saveProfiles(P); render(); toast(`Yeni hedef: ${to} saat. Aileye bildirildi.`);
   },
   csvDay: async c => {
-    const recs = await getRecs(c, Date.now() - 864e5, Date.now() + 60e3);
+    const recs = await getRecsAny(c, Date.now() - 864e5, Date.now() + 60e3);
+    if (!recs.length) { toast('Son 24 saatte ölçüm yok. Butona bağlanıp senkronize et.'); return; }
     const t0 = recs.length ? recs[0].t : 0;
     download(`skolidata_${c}_24h.csv`, 'time_s,skin_C,humidity_pct,chip_C,wall_time\n' + recs.map(r => `${((r.t - t0) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip},${new Date(r.t).toISOString()}`).join('\n'));
   },
@@ -867,7 +905,7 @@ const ACTIONS = {
 };
 let CLIN_ALLOW = null;   // server mode: only buttons of families who shared with this clinician
 function download(name, text) {
-  try { navigator.clipboard && navigator.clipboard.writeText(text); } catch (e) {}
+  try { if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {}); } catch (e) {}
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' })); a.download = name; document.body.appendChild(a); a.click(); a.remove();
   toast('CSV indirildi ve panoya kopyalandı.');
 }
@@ -921,6 +959,18 @@ window.onSynced = async code => {
   await sv(SRV.sb.from('device_status').update({ mv: m.mv || null, fw: m.fw || null, flash: B.info ? !!B.info.flash : null,
     last_sync: new Date(m.lastSync || Date.now()).toISOString() }).eq('button_code', code));
   m.lastPush = Date.now(); setMeta(code, m);
+  await SRV.uploadRaw(code);
+};
+// raw readings of the days that got new readings (max. last 7 days), one compressed file per day
+SRV.uploadRaw = async code => {
+  const k = 'sk.rawdirty.' + code, dirty = lsGet(k, null); if (dirty === null) return;
+  for (let a = Math.max(startOfDay(dirty), addDays(startOfDay(Date.now()), -7)); a <= Date.now(); a = addDays(a, 1)) {
+    const recs = await getRecs(code, a, addDays(a, 1) - 1); if (!recs.length) continue;
+    const e = await encodeDay(recs);
+    await sv(SRV.sb.from('raw_days').upsert({ family_id: SRV.user.id, button_code: code, day: dateKey(a), n: recs.length, enc: e.enc, data: e.data,
+      updated_at: new Date().toISOString() }, { onConflict: 'family_id,button_code,day' }));
+  }
+  if (lsGet(k, null) === dirty) lsDel(k);       // newer readings that arrived meanwhile stay marked
 };
 // calibration result (both ok and failed) goes to the server; a clinician's result reaches the family's phone
 window.onCalibrated = async (code, res, by) => {
@@ -1014,7 +1064,7 @@ async function routeAfterLogin() {
 
 if (SRV.on) {
   const CONSENT_SRV = CONSENT_TEXT.replace('Bu sürümde veriler yalnızca bu telefonda saklanır.',
-    'Günlük saatler SkoliData sunucusunda, Avrupa Birliği\'nde (Almanya) saklanır; bu yurt dışına aktarım için açık rızan istenir. SkoliData çalışma ekibi çalışma ve destek amacıyla saatleri görebilir; her erişim kayıt altına alınır. Sıcaklık ölçümleri telefonunda kalır.');
+    'Günlük saatler ve butonun ölçümleri (korse içi sıcaklık ve nem) SkoliData sunucusunda, Avrupa Birliği\'nde (Almanya) saklanır; bu yurt dışına aktarım için açık rızan istenir. Böylece hesabına giren diğer cihazlar ve saatlerini paylaştığın klinisyen de görebilir. SkoliData çalışma ekibi çalışma ve destek amacıyla görebilir; her erişim kayıt altına alınır.');
   const cityOptions = sel => '<option value="">Şehir seç</option>' + CITIES.map(c => `<option${c === sel ? ' selected' : ''}>${c}</option>`).join('');
 
   // ---------- family ----------
@@ -1095,7 +1145,7 @@ if (SRV.on) {
     busy(true);
     try {
       if (!SRV.user || SRV.profile) { if (SRV.profile) await SRV.signOut(); await SRV.signUp(newFamilyEmail(), params.password); }
-      try { await SRV.rpc('claim_button', { p_code: code, p_city: params.city, p_goal: goal, p_consent_version: 'v2-taslak' }); }
+      try { await SRV.rpc('claim_button', { p_code: code, p_city: params.city, p_goal: goal, p_consent_version: 'v3-taslak' }); }
       catch (e) { try { await SRV.rpc('delete_my_account'); } catch (x) {} await SRV.signOut(); throw e; }   // don't leave an empty login behind
       await SRV.loadMe();
       const P = profiles(); P[code] = { goal, goalHistory: [{ to: goal, by: 'family', at: Date.now() }], createdAt: Date.now(), consentAt: params.consentAt, server: true }; saveProfiles(P);
@@ -1357,7 +1407,8 @@ if (SRV.on) {
     <section class="card"><b>Şifre</b><p class="small" style="margin:4px 0 8px">Aile şifresini unuttuysa önce telefonda kimliğini doğrula (buton kodu, şehir, kayıt ayı). Sonra geçici şifre oluştur; aile ilk girişte kendi şifresini belirler.</p>
       <button class="btn secondary" data-act="ownerResetPw" data-arg="${esc(f.id)}">Şifreyi sıfırla</button></section>
     <section class="card"><b>Saatler</b><p class="small" style="margin:4px 0 8px">Her görüntüleme erişim günlüğüne yazılır.</p>
-      <button class="btn secondary" data-act="ownerHours">Saatleri göster</button>${hours}</section>
+      <button class="btn secondary" data-act="ownerHours">Saatleri göster</button>${hours}
+      <button class="btn text" data-act="ownerRawCsv" style="margin-top:6px">Ham veri CSV (son 24 saat)</button></section>
   </main>`;
   };
   SCREENS.ownerPw = p => `<main>
@@ -1382,7 +1433,7 @@ if (SRV.on) {
       go('ownerPw', { pw, who, code: f && (f.button_code || f.last_button_code), email: c && c.email, back });
     } catch (e) { toast(trErr(e)); }
   };
-  ACTIONS.ownerPwCopy = () => { try { navigator.clipboard.writeText(params.pw); toast('Kopyalandı.'); } catch (e) { toast('Kopyalanamadı; şifreyi elle yaz.'); } };
+  ACTIONS.ownerPwCopy = () => { try { navigator.clipboard.writeText(params.pw).then(() => toast('Kopyalandı.'), () => toast('Kopyalanamadı; şifreyi elle yaz.')); } catch (e) { toast('Kopyalanamadı; şifreyi elle yaz.'); } };
   ACTIONS.ownerPwDone = () => { const b = params.back || { screen: 'owner', params: {} }; go(b.screen, b.params); };
   ACTIONS.ownerRefresh = async () => { try { await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerApprove = async id => { try { const code = await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: true }); toast('Onaylandı: ' + code); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
@@ -1392,6 +1443,18 @@ if (SRV.on) {
   ACTIONS.ownerHours = async () => {
     try { const rows = await SRV.rpc('owner_family_overview', { p_family: params.id }); go('ownerFam', { id: params.id, hours: rows }); SRV.loadOwner().catch(() => {}); }
     catch (e) { toast(trErr(e)); }
+  };
+  ACTIONS.ownerRawCsv = async () => {
+    const f = SRV.owner.families.find(x => x.id === params.id), t1 = Date.now() + 60e3, t0 = Date.now() - 864e5;
+    try {
+      const rows = await SRV.rpc('owner_raw_days', { p_family: f.id, p_from: dateKey(t0), p_to: dateKey(t1) });
+      let recs = []; for (const row of rows) recs = recs.concat(await decodeRawRow(row, row.button_code));
+      recs = recs.filter(r => r.t >= t0 && r.t <= t1).sort((a, b) => a.t - b.t);
+      if (!recs.length) { toast('Sunucuda son 24 saatin ölçümü yok.'); return; }
+      const name = (f.button_code || f.last_button_code || 'aile'), t00 = recs[0].t;
+      download(`skolidata_${name}_24h.csv`, 'time_s,skin_C,humidity_pct,chip_C,wall_time\n' + recs.map(r => `${((r.t - t00) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip},${new Date(r.t).toISOString()}`).join('\n'));
+      SRV.loadOwner().catch(() => {});
+    } catch (e) { toast(trErr(e)); }
   };
   ACTIONS.ownerAssign = async () => {
     const code = $('#ac').value.trim().toUpperCase(), f = SRV.owner.families.find(x => x.id === params.id);
