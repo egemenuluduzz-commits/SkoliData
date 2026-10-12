@@ -88,7 +88,7 @@ svg.chart{width:100%;height:auto;display:block}
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.5 · algo v1';
+const APP_VERSION = 'app v1.6 · algo v1';
 const SK_SVC = '508d0001-ade4-4fb4-9f46-45ea6a7e9c8f', SK_RX = '508d0002-ade4-4fb4-9f46-45ea6a7e9c8f', SK_TX = '508d0003-ade4-4fb4-9f46-45ea6a7e9c8f';   // SkoliData's own Bluetooth service
 // Clinician accounts: only a salted SHA-256 of the password is stored here (never the password itself).
 // NOTE: this is a front door for testing, not real security; real accounts need the server (master plan §6-7).
@@ -444,7 +444,7 @@ SCREENS.login = () => `<main>
 SCREENS.famConnect = () => `<main>${backBtn('login')}
   <h1>Butonunu bağla</h1>
   <p class="sub">Korsendeki butonu telefona yaklaştır. Bluetooth açık olsun.</p>
-  <div class="note"><b>İlk bağladığın buton senin butonun olur</b>Hesabın bundan sonra yalnızca bu butonla çalışır. Giriş yaparken butonun kodunu kullanırsın; e-posta ya da telefon numarası gerekmez.</div>
+  <div class="note"><b>İlk bağladığın buton senin butonun olur</b>Hesabın bundan sonra yalnızca bu butonla çalışır. Giriş için butona bağlanman ve şifren yeterli; kod ezberlemen, e-posta ya da telefon numarası gerekmez.</div>
   <div style="flex:1"></div>
   ${B.syncing ? `<div class="pill"><span class="dot wait"></span>${syncText()}</div>` : ''}
   <button class="btn primary" data-act="famConnectBtn" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>
@@ -939,6 +939,8 @@ SRV.loadMe = async () => {
   if (!SRV.user) { SRV.profile = null; return null; }
   const rows = await sv(SRV.sb.from('profiles').select('*').eq('id', SRV.user.id));
   SRV.profile = rows[0] || null;
+  const pc = SRV.profile && SRV.profile.role === 'family' && (SRV.profile.button_code || SRV.profile.last_button_code);
+  if (pc) lsSet('sk.lastcode', pc);
   return SRV.profile;
 };
 SRV.signIn = async (email, password) => { await sv(SRV.sb.auth.signInWithPassword({ email, password })); return SRV.loadMe(); };
@@ -1071,22 +1073,32 @@ if (SRV.on) {
   const cityOptions = sel => '<option value="">Şehir seç</option>' + CITIES.map(c => `<option${c === sel ? ' selected' : ''}>${c}</option>`).join('');
 
   // ---------- family ----------
-  SCREENS.famLogin = () => `<main>${backBtn('login')}
+  const loginCode = () => (params && params.code) || lsGet('sk.lastcode', null);
+  SCREENS.famLogin = () => {
+    const code = loginCode();
+    return `<main>${backBtn('login')}
     <h1>Giriş</h1>
-    <label class="f">Buton kodu<input class="in" id="lc" placeholder="SK-XXXXXXXX" autocapitalize="characters" autocomplete="username" value="${esc((session && session.code) || '')}"></label>
+    ${code ? `<section class="card list"><div class="li"><span class="k">Butonun</span><span class="v">${esc(code)} ✓</span></div></section>
+    <input id="lc" autocomplete="username" value="${esc(code)}" style="position:absolute;opacity:0;height:0;width:0;pointer-events:none" tabindex="-1" aria-hidden="true">
     <label class="f">Şifre<input class="in" id="lp" type="password" autocomplete="current-password"></label>
     <p class="err" id="err"></p>
     <button class="btn primary" data-act="famLoginBtn">Giriş yap</button>
+    <button class="btn text" data-act="famLoginScan" style="align-self:center">Başka bir buton</button>`
+    : `<p class="sub">Korsendeki butonu telefona yaklaştır ve bağlan. Kod yazman gerekmez.</p>
+    <p class="err" id="err"></p>
+    ${B.syncing ? `<div class="pill"><span class="dot wait"></span>Buton okunuyor…</div>` : ''}
+    <button class="btn primary" data-act="famLoginScan" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>`}
     <button class="btn text" data-act="forgot" style="align-self:center">Şifremi unuttum</button>
     <div style="flex:1"></div>
     <section class="card"><b>İlk kez mi kullanıyorsun?</b><p class="small" style="margin:4px 0 10px">Korsendeki butonu telefona yaklaştır ve bağlan. Bağladığın ilk buton hesabının butonu olur.</p>
     <button class="btn secondary" data-act="go" data-arg="famConnect">Hesap oluştur</button></section>
   </main>`;
+  };
   SCREENS.famConnect = () => `<main>${backBtn('famLogin')}
     <div class="steps"><i class="on"></i><i></i><i></i><i></i></div>
     <h1>Butonunu bağla</h1>
     <p class="sub">Korsendeki butonu telefona yaklaştır. Bluetooth açık olsun.</p>
-    <div class="note"><b>İlk bağladığın buton senin butonun olur</b>Hesabın bundan sonra yalnızca bu butonla çalışır. Giriş yaparken butonun kodunu kullanırsın; e-posta ya da telefon numarası gerekmez.</div>
+    <div class="note"><b>İlk bağladığın buton senin butonun olur</b>Hesabın bundan sonra yalnızca bu butonla çalışır. Giriş için butona bağlanman ve şifren yeterli; kod ezberlemen, e-posta ya da telefon numarası gerekmez.</div>
     <div style="flex:1"></div>
     ${B.syncing ? `<div class="pill"><span class="dot wait"></span>${syncText()}</div>` : ''}
     <button class="btn primary" data-act="famConnectBtn" ${B.syncing ? 'disabled' : ''}>Butona bağlan</button>
@@ -1094,7 +1106,7 @@ if (SRV.on) {
   SCREENS.famPass = p => `<main>${backBtn('famConnect')}
     <div class="steps"><i class="on"></i><i class="on"></i><i></i><i></i></div>
     <h1>Şifre oluştur</h1>
-    <p class="sub">Giriş yaparken buton kodunu (<b>${esc(p.code)}</b>) ve bu şifreyi kullanacaksın.</p>
+    <p class="sub">Giriş yaparken butona bağlanıp bu şifreyi gireceksin. Kod ezberlemen gerekmez.</p>
     <label class="f">Şifre (en az 8 karakter)<input class="in" id="pw1" type="password" autocomplete="new-password"></label>
     <label class="f">Şifre tekrar<input class="in" id="pw2" type="password" autocomplete="new-password"></label>
     <p class="err" id="err"></p><div style="flex:1"></div>
@@ -1160,18 +1172,27 @@ if (SRV.on) {
     } catch (e) { alert(String(e.message || e).includes('button_taken') ? TAKEN_MSG : trErr(e)); } finally { busy(false); }
   };
   // login: button code -> the account(s) it may belong to; the password decides
+  // read the code from the button itself (nothing is downloaded before login)
+  ACTIONS.famLoginScan = async () => {
+    const ok = await bleConnect({ infoOnly: true });
+    if (!ok || !B.info) { render(); return; }
+    const code = B.info.code;
+    bleDisconnect(); B.info = null; B.live = null;     // free the button again (a wrong password must not keep it busy)
+    go('famLogin', { code });
+    const e = $('#lp'); if (e) e.focus();
+  };
   ACTIONS.famLoginBtn = async () => {
-    const code = $('#lc').value.trim().toUpperCase(), pw = $('#lp').value;
-    if (!/^SK-[0-9A-Z]{8}$/.test(code)) { $('#err').textContent = 'Buton kodu SK- ile başlar ve 8 harf/rakamdan oluşur.'; return; }
+    const code = loginCode(), pw = $('#lp').value;
+    if (!code) { go('famLogin', {}); return; }
     busy(true);
     try {
       const list = await SRV.rpc('family_login_emails', { p_code: code }) || [];
-      if (!list.length) { $('#err').textContent = 'Bu kodla kayıtlı bir hesap yok.'; return; }
+      if (!list.length) { $('#err').textContent = 'Bu butonla kayıtlı bir hesap yok. İlk kez kullanıyorsan aşağıdan "Hesap oluştur".'; return; }
       for (const em of list) {
         try { const p = await SRV.signIn(em, pw); if (p && p.role === 'family') return await routeAfterLogin(); await SRV.signOut(); }
         catch (e) { if (!String(e.message || e).includes('Invalid login')) throw e; }
       }
-      $('#err').textContent = 'Kod ya da şifre hatalı.';
+      $('#err').textContent = 'Şifre hatalı.';
     } catch (e) { $('#err').textContent = trErr(e); } finally { busy(false); }
   };
   // change button (server): password checked by the server, then the button is freed
@@ -1224,6 +1245,7 @@ if (SRV.on) {
     if (!confirm('Hesabın ve sunucudaki tüm verilerin kalıcı olarak silinecek. Emin misin?')) return;
     try { await SRV.rpc('delete_my_account'); } catch (e) { alert(trErr(e)); return; }
     const c = session.code, P = profiles();
+    if (lsGet('sk.lastcode', null) === c) lsDel('sk.lastcode');
     if (c) { delete P[c]; saveProfiles(P); ['sk.meta.', 'sk.model.', 'sk.days.', 'sk.calraw.', 'sk.calhist.'].forEach(k => lsDel(k + c)); await deleteCode(c); delete DAYCACHE[c]; }
     await SRV.signOut(); session = null; ssSet('sk.session', null); go('login'); toast('Hesabın silindi.');
   };
@@ -1429,7 +1451,7 @@ if (SRV.on) {
     <p class="sub">${esc(p.who)}</p>
     <section class="card center" style="display:flex;flex-direction:column;align-items:center;gap:6px">
       <b id="tmpPw" style="font-size:30px;letter-spacing:.08em;user-select:all">${esc(p.pw)}</b>
-      <span class="small">${p.code ? 'Giriş: buton kodu ' + esc(p.code) + ' + bu şifre' : p.email ? 'Giriş: ' + esc(p.email) + ' + bu şifre' : ''}</span></section>
+      <span class="small">${p.code ? 'Giriş: butona (' + esc(p.code) + ') bağlan + bu şifre' : p.email ? 'Giriş: ' + esc(p.email) + ' + bu şifre' : ''}</span></section>
     <div class="note"><b>Bir kez gösterilir</b>Bu şifreyi kişiye telefonda ya da yüz yüze söyle. İlk girişte kendi yeni şifresini belirlemesi istenecek. Şifre hiçbir yere kaydedilmez.</div>
     <div style="flex:1"></div>
     <button class="btn secondary" data-act="ownerPwCopy">Kopyala</button>
