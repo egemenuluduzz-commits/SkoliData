@@ -99,7 +99,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.19 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.20 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 function btnName(code) {
@@ -489,11 +489,26 @@ function battery(code) {
 let session = ssGet('sk.session');   // {role:'family', code} | {role:'clinician', u}
 let screen = 'login', params = {};
 const LIVE = new Set(['famHome', 'calib', 'clinPatient', 'raw', 'famSettings', 'famWeek', 'clinList', 'famConnect', 'famNewButton']);
-function go(s, p = {}) { screen = s; params = p; render(); window.scrollTo(0, 0); }
+// a new page starts at the top; changing something on the same page (6 sa / 24 sa, Saatleri göster ...) keeps the scroll position
+function go(s, p = {}) {
+  const same = s === screen, y = window.scrollY;
+  screen = s; params = p; render();
+  window.scrollTo(0, same ? y : 0);
+}
 function refresh() { if (LIVE.has(screen) && !(document.activeElement && document.activeElement.tagName === 'INPUT')) render(); else updateLive(); }
 const NEEDS_BUTTON = new Set(['famHome', 'famWeek', 'famSettings']);
 const familyNeedsButton = () => !!(session && session.role === 'family' && (!session.code || (profiles()[session.code] || {}).released));
-function render() { if (NEEDS_BUTTON.has(screen) && familyNeedsButton()) screen = 'famNewButton'; const f = SCREENS[screen] || SCREENS.login; $('#app').innerHTML = f(params); if (f.after) f.after(params); }
+// re-drawing the same page keeps its height for a moment (charts load a bit later), so the page does not jump to the top
+let lastScreen = null, holdT = 0;
+function render() {
+  if (NEEDS_BUTTON.has(screen) && familyNeedsButton()) screen = 'famNewButton';
+  const f = SCREENS[screen] || SCREENS.login, app = $('#app'), same = screen === lastScreen, y = window.scrollY;
+  if (same) { app.style.minHeight = app.offsetHeight + 'px'; clearTimeout(holdT); holdT = setTimeout(() => { app.style.minHeight = ''; }, 3000); }
+  else { clearTimeout(holdT); app.style.minHeight = ''; }
+  app.innerHTML = f(params); lastScreen = screen;
+  if (f.after) f.after(params);
+  if (same && window.scrollY !== y) window.scrollTo(0, y);
+}
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const fn = ACTIONS[el.dataset.act]; if (fn) { e.preventDefault(); fn(el.dataset.arg, el); }
@@ -840,7 +855,7 @@ SCREENS.raw = p => {
   <h1>Ham veri</h1><p class="sub" style="margin-top:-8px">${esc(btnText(code))} · klinisyen ve yönetim ekranı, ailelere gösterilmez</p>
   ${liveSection(code, true)}
   <section class="card"><div class="row"><b>Sıcaklık</b><span class="seg">${[6, 24, 72].map(h => `<button class="chip${h === range ? ' on' : ''}" data-act="rawRange" data-arg="${h}">${h === 72 ? '3 gün' : h + ' sa'}</button>`).join('')}</span></div>
-    <div id="rawChart" style="margin-top:8px">${RAWCHART.key === code + '|' + range && RAWCHART.html ? RAWCHART.html : '<p class="small">Yükleniyor…</p>'}</div>
+    <div id="rawChart" style="margin-top:8px">${RAWCHART.key === code + '|' + range && RAWCHART.html ? RAWCHART.html : RAWCHART.code === code && RAWCHART.last ? `<div style="opacity:.4">${RAWCHART.last}</div>` : '<p class="small">Yükleniyor…</p>'}</div>
     ${CHART_LEGEND}</section>
   <section class="card list">${SkoliAlgo.facts(model).map(f => `<div class="li"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join('')}
     <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model.isDefault ? 'yok (varsayılan değerler)' : fmtDate(model.createdAt) + (model.kind === 'manual' ? ' · elle ayarlandı' : '')}</span></div>
@@ -851,7 +866,7 @@ SCREENS.raw = p => {
 </main>`;
 };
 const CHART_LEGEND = '<p class="legend">Mavi çizgi: ten tarafı · mavi alan: algoritmaya göre takılı · gri alan: emin değil · kesikli çizgiler: eşikler</p>';
-const RAWCHART = { key: null, html: '', at: 0 };
+const RAWCHART = { key: null, html: '', at: 0, code: null, last: '' };
 SCREENS.raw.after = async p => {
   const range = p.range || 6, key = p.code + '|' + range;
   if (RAWCHART.key === key && Date.now() - RAWCHART.at < 15000) return;   // redraw at most every 15 s
@@ -859,7 +874,7 @@ SCREENS.raw.after = async p => {
   const t1 = Date.now(), t0 = t1 - range * 3.6e6;
   const recs = await getRecsAny(p.code, t0, t1 + 60e3, p.fid);
   const el = $('#rawChart'); if (!el || screen !== 'raw') return;
-  RAWCHART.html = el.innerHTML = rawChartSvg(recs, modelFor(p.code), t0, t1, { h: 170 });
+  RAWCHART.html = RAWCHART.last = el.innerHTML = rawChartSvg(recs, modelFor(p.code), t0, t1, { h: 170 }); RAWCHART.code = p.code;
 };
 
 // ---------- chart: temperature + what the algorithm decided + its lines (any algorithm: uses overlays/classify only) ----------
@@ -1024,7 +1039,7 @@ SCREENS.calPage = p => {
     ${SkoliAlgo.facts(cur).map(f => `<div class="li"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join('')}</section>
   ${liveSection(code, true)}
   <section class="card"><div class="row"><b>Önizleme</b><span class="seg">${[24, 72].map(h => `<button class="chip${h === CALP.range ? ' on' : ''}" data-act="calRange" data-arg="${h}">${h === 72 ? '3 gün' : '24 sa'}</button>`).join('')}</span></div>
-    <div id="calPrev" style="margin-top:8px"><p class="small">Yükleniyor…</p></div>${CHART_LEGEND}</section>
+    <div id="calPrev" style="margin-top:8px">${CALP.prevCode === code && CALP.prevHtml ? `<div style="opacity:.4">${CALP.prevHtml}</div>` : '<p class="small">Yükleniyor…</p>'}</div>${CHART_LEGEND}</section>
   <h2 style="margin:6px 0 0">Ayarları değiştir</h2>
   <p class="small">Değiştirdikçe yukarıdaki önizleme yeni ayarla yeniden hesaplanır. Kaydedince ailenin saatleri bu ayarla hesaplanır.</p>
   ${form}
@@ -1073,7 +1088,7 @@ async function calPreview() {
   const da = perDay(a), db = perDay(b), days = Object.keys(da).sort();
   const table = days.length ? `<table class="cmp"><tr><th>Gün</th><th>Veri</th><th>Şu an</th>${b ? '<th>Yeni ayarla</th>' : ''}</tr>${days.map(k => `<tr><td>${fmtDate(Date.parse(k + 'T12:00:00'))}</td><td>${fmtH1(da[k].data)} sa</td><td>${fmtH1(da[k].on)} sa${da[k].un > 6e4 ? ` <span class="small">(+${fmtH1(da[k].un)} emin değil)</span>` : ''}</td>${b ? `<td><b>${fmtH1((db[k] || {}).on || 0)} sa</b>${(db[k] || {}).un > 6e4 ? ` <span class="small">(+${fmtH1(db[k].un)} emin değil)</span>` : ''}</td>` : ''}</tr>`).join('')}</table>
     <p class="legend">Saatler sadece bu cihazın gördüğü ölçümlerden hesaplanır (bu aralıktaki ham veri).</p>` : '';
-  el.innerHTML = rawChartSvg(recs, show, t0, t1, { h: 170, compare: res.model ? cur : null, result: res.model ? b : a }) + (res.model ? '<p class="legend">Mavi çizgiler: yeni eşikler · gri kesikli: şimdiki eşikler. Mavi alan yeni ayara göre.</p>' : '') + table;
+  CALP.prevHtml = el.innerHTML = rawChartSvg(recs, show, t0, t1, { h: 170, compare: res.model ? cur : null, result: res.model ? b : a }) + (res.model ? '<p class="legend">Mavi çizgiler: yeni eşikler · gri kesikli: şimdiki eşikler. Mavi alan yeni ayara göre.</p>' : '') + table; CALP.prevCode = code;
 }
 
 // ================= actions =================
