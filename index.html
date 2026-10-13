@@ -33,6 +33,8 @@ p{margin:0;line-height:1.45}
 .dot{width:10px;height:10px;border-radius:5px;background:var(--blue);box-shadow:0 0 0 4px rgba(30,94,255,.18);flex:none}
 .dot.off{background:none;border:2px solid var(--slate);box-shadow:none}
 .dot.wait{background:var(--soft);box-shadow:none}
+.dot.maybe{background:#8C9AB8;box-shadow:0 0 0 4px rgba(140,154,184,.2)}
+.note.neutral{background:#F2F4F8;border-color:#DDE2EC;color:#3D4A66}
 .ringwrap{position:relative;width:220px;height:220px;align-self:center}
 .ringwrap svg{position:absolute;inset:0;transform:rotate(-90deg)}
 .ringtxt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
@@ -97,7 +99,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.15 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.16 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 function btnName(code) {
@@ -658,7 +660,8 @@ SCREENS.famHome = () => {
   const code = session.code, p = profiles()[code] || {}, goalMs = (p.goal || 16) * 3.6e6;
   const days = daysList(code, 7), today = days[6], meta = getMeta(code), sm = summary(code), model = getModel(code);
   const st = B.connected ? nowState(code) : null;
-  const status = B.syncing ? ['wait', syncText()] : !B.connected ? ['wait', 'Güncellemek için butona bağlan.'] : st === 'on' ? ['', 'Korsen takılı. Süper gidiyorsun!'] : st === 'off' ? ['off', 'Korse şu an dinleniyor.'] : st === 'unsure' ? ['wait', 'Hava çok sıcak, şu an emin değiliz.'] : ['wait', 'Butondan veri bekleniyor…'];
+  const ls = B.connected && !B.syncing ? liveStatus(code) : null;
+  const status = B.syncing ? ['wait', syncText()] : !B.connected ? ['wait', 'Güncellemek için butona bağlan.'] : ls ? [ls.cls, ls.text] : st === 'on' ? ['', LIVE_MSG.on] : st === 'off' ? ['off', LIVE_MSG.off] : st === 'unsure' ? ['maybe', LIVE_MSG.unsure] : ['wait', 'Butondan veri bekleniyor…'];
   // this week, Monday first
   const t0 = startOfDay(Date.now()), dow = (new Date().getDay() + 6) % 7;
   const wk = [0, 1, 2, 3, 4, 5, 6].map(i => { const t = addDays(t0, i - dow), k = dateKey(t), d = (DAYCACHE[code] || {})[k]; return { t, k, d, label: DAYS_TR[new Date(t).getDay()], isToday: i === dow, future: i > dow }; });
@@ -677,7 +680,6 @@ SCREENS.famHome = () => {
   <div class="ringwrap" role="img" aria-label="Bugün ${fmtHM(today.ms)} takıldı, hedef ${p.goal || 16} saat">${ringSvg(Math.min(1, today.ms / goalMs))}
     <div class="ringtxt"><div class="big"><b>${Math.floor(today.ms / 3.6e6)}</b><i>sa</i><b>${Math.floor((today.ms % 3.6e6) / 6e4)}</b><i>dk</i></div><div class="goal">Hedef ${p.goal || 16} sa</div></div></div>
   <div class="pill"><span class="dot ${status[0]}"></span><span>${status[1]}</span></div>
-  ${B.connected && TREND.msg && TREND.code === code && Date.now() - TREND.at < 30 * 60e3 ? `<div class="note center"><b style="margin:0">${esc(TREND.msg)}</b><span class="small">${ago(TREND.at)}</span></div>` : ''}
   ${!B.connected ? '<button class="btn primary" data-act="connect">Butona bağlan</button>' : ''}
   <section class="card"><div class="row"><b>Bu hafta</b><span class="small">${wk.filter(w => w.d && w.d.ms >= goalMs).length} gün hedefte</span></div><div class="week">${dots}</div></section>
   ${calNote}${unevenNote}
@@ -890,23 +892,61 @@ function rawChartSvg(recs, model, t0, t1, o = {}) {
 
 // ---------- live temperature (optional; needs the button nearby) ----------
 B.liveBuf = [];
-// ---------- warming / cooling words for the family (no numbers are shown) ----------
-// more than 2 °C up from the lowest point -> "putting the brace on" ("again" after a removal); more than 2 °C down from
-// the highest point -> "took it off". The same message never comes twice in a row (a further rise after "putting on" says nothing).
-const TREND = { code: null, dir: null, lo: null, hi: null, buf: [], msg: null, at: 0 };
-const TREND_C = 2.0;
-const TREND_MSG = { up: 'Korseyi takmaya başladığını görüyorum.', again: 'Korseni tekrar takıyorsun sanırım.', down: 'Korseni çıkarttın sanırım.' };
+// ---------- live words for the family: what the temperature is doing right now (no numbers are shown) ----------
+// Separate from the hours algorithm. Uses only the last 15 minutes of live readings (every 2 s), smoothed with a
+// 10-second median so a single spike counts for nothing. Rules (numbers in LIVE_RULES):
+//   FAST RISE  : up >= 2 °C within 3 min  -> "takıyor olabilirsin"   (skin contact warms the button fast: tau ~100 s)
+//   FAST FALL  : down >= 2 °C within 3 min -> "çıkarmış olabilirsin"
+//   SLOW RISE  : up >= 2 °C over 15 min with no fast rise, and not coming down (within 0.5 °C of its top for 5 min)
+//                -> "emin değilim" (a warming room / car / heater warms slowly)
+//   TOO HOT    : above 37 °C (warmer than skin under a brace can be) -> "emin değilim"
+//   QUIET (10 min without one of the above): above the calibrated "takılı" line -> takılı görünüyor,
+//                below the "çıkarıldı" line -> takmıyor gibisin; after a slow rise it stays "emin değilim" until it cools.
+// The same message never repeats: a further rise after "takıyor olabilirsin" says nothing new.
+const LIVE_RULES = { jumpC: 2.0, fastMin: 3, slowMin: 15, settleMin: 5, settleTolC: 0.5, quietMin: 10, tooHotC: 37 };
+const LIVE_MSG = {
+  up: 'Korseni takıyor olabilirsin, anlamaya çalışıyorum.',
+  again: 'Korseni yeniden takıyor olabilirsin, anlamaya çalışıyorum.',
+  down: 'Korseni çıkarmış olabilirsin.',
+  unsure: 'Şu an emin değilim; ortam ısınıyor olabilir (araba, kalorifer, güneş).',
+  on: 'Korsen takılı görünüyor. Süper gidiyorsun!',
+  off: 'Şu an korseni takmıyor gibisin.',
+};
+const TREND = { code: null, raw: [], pts: [], kind: null, msg: null, at: 0, lastFast: 0, lastFastDir: null };
 function noteTrend(r) {
   if (r.skin === null || !isFinite(r.skin)) return;
-  if (TREND.code !== r.code) Object.assign(TREND, { code: r.code, dir: null, lo: null, hi: null, buf: [], msg: null, at: 0, saidDown: false });
-  TREND.buf.push(r.skin); if (TREND.buf.length > 5) TREND.buf.shift();
-  const b = TREND.buf.slice().sort((x, y) => x - y), T = b[b.length >> 1];       // median of the last 5 readings (10 s): no single spike counts
-  if (TREND.lo === null) { TREND.lo = TREND.hi = T; return; }
-  TREND.lo = Math.min(TREND.lo, T); TREND.hi = Math.max(TREND.hi, T);
-  let said = null;
-  if (TREND.dir !== 'up' && T - TREND.lo > TREND_C) { TREND.dir = said = 'up'; TREND.hi = T; }
-  else if (TREND.dir !== 'down' && TREND.hi - T > TREND_C) { TREND.dir = said = 'down'; TREND.lo = T; }
-  if (said) { TREND.msg = TREND_MSG[said === 'up' && TREND.saidDown ? 'again' : said]; TREND.at = Date.now(); if (said === 'down') TREND.saidDown = true; if (session && session.role === 'family' && screen === 'famHome') toast(TREND.msg); }
+  const now = r.t || Date.now(), R = LIVE_RULES, min = m => m * 60e3;
+  if (TREND.code !== r.code) Object.assign(TREND, { code: r.code, raw: [], pts: [], kind: null, msg: null, at: 0, lastFast: 0, lastFastDir: null });
+  TREND.raw.push(r.skin); if (TREND.raw.length > 5) TREND.raw.shift();
+  const b = TREND.raw.slice().sort((x, y) => x - y), T = b[b.length >> 1];
+  TREND.pts.push({ t: now, T }); TREND.pts = TREND.pts.filter(p => p.t >= now - min(R.slowMin + 1));
+  const win = m => TREND.pts.filter(p => p.t >= now - min(m)).map(p => p.T);
+  const fast = win(R.fastMin), lo3 = Math.min(...fast), hi3 = Math.max(...fast);
+  let ev = null;
+  if (T > R.tooHotC) ev = 'unsure';
+  else if (T - lo3 >= R.jumpC) { ev = TREND.lastFastDir === 'down' ? 'again' : 'up'; TREND.lastFast = now; TREND.lastFastDir = 'up'; }
+  else if (hi3 - T >= R.jumpC) { ev = 'down'; TREND.lastFast = now; TREND.lastFastDir = 'down'; }
+  else if (now - TREND.lastFast > min(R.slowMin) && TREND.pts[0].t <= now - min(R.slowMin - 1)) {
+    const lo15 = Math.min(...win(R.slowMin)), hi5 = Math.max(...win(R.settleMin));
+    if (T - lo15 >= R.jumpC && hi5 - T <= R.settleTolC) ev = 'unsure';
+  }
+  const kind = ev === 'again' ? 'up' : ev;
+  if (ev && kind !== TREND.kind) {
+    TREND.kind = kind; TREND.msg = LIVE_MSG[ev]; TREND.at = now;
+    if (session && session.role === 'family' && screen === 'famHome') toast(TREND.msg);
+  }
+  TREND.T = T; TREND.lastT = now;
+}
+// what to show now: a recent change (neutral grey) or, when it has been quiet, the steady state
+function liveStatus(code) {
+  if (TREND.code !== code || TREND.T == null) return null;
+  const model = modelFor(code), quiet = TREND.lastT - TREND.at > LIVE_RULES.quietMin * 60e3, T = TREND.T;
+  if (!quiet && TREND.msg) return { cls: 'maybe', text: TREND.msg, when: TREND.at };
+  if (T > LIVE_RULES.tooHotC || T > model.Ton + (model.hotterThanSkinC ?? SkoliAlgo.CFG.hotterThanSkinC)) return { cls: 'maybe', text: LIVE_MSG.unsure };
+  if (TREND.kind === 'unsure' && T >= model.thrOff) return { cls: 'maybe', text: LIVE_MSG.unsure };
+  if (T >= model.thrOn) return { cls: '', text: LIVE_MSG.on };
+  if (T <= model.thrOff) return { cls: 'off', text: LIVE_MSG.off };
+  return TREND.msg ? { cls: 'maybe', text: TREND.msg, when: TREND.at } : null;
 }
 function noteLive(r) {
   noteTrend(r); const cut = Date.now() - 15 * 60e3; B.liveBuf = B.liveBuf.filter(x => x.code === r.code && x.t > cut); B.liveBuf.push(r); }
@@ -925,7 +965,7 @@ function liveInner(code) {
     <div class="stat"><span>Nem</span><b>${r.rh !== null ? Math.round(r.rh) + ' %' : '–'}</b></div>
     <div class="stat"><span>Kapak (çip)</span><b>${isFinite(r.chip) ? r.chip.toFixed(1) + ' °C' : '–'}</b></div>
     <div class="stat"><span>Algoritma şu an</span><b>${st}</b></div></div>
-    ${TREND.msg && TREND.code === code && Date.now() - TREND.at < 30 * 60e3 ? `<div class="note" style="margin-top:8px"><b style="margin:0">${esc(TREND.msg)}</b><span class="small">Ailenin gördüğü mesaj · ${ago(TREND.at)}</span></div>` : ''}
+    ${(ls => ls ? `<div class="note neutral" style="margin-top:8px"><b style="margin:0">${esc(ls.text)}</b><span class="small">Ailenin gördüğü mesaj${ls.when ? ' · ' + ago(ls.when) : ''}</span></div>` : '')(liveStatus(code))}
     ${buf.length >= 2 ? `<div style="margin-top:8px">${rawChartSvg(buf, model, Date.now() - 10 * 60e3, Date.now(), { h: 110, label: 'Son 10 dakika' })}</div><p class="legend">Son 10 dakika, her 2 saniyede bir.</p>` : ''}`;
 }
 function liveSection(code, always) {
