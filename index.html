@@ -99,7 +99,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.16 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.17 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 function btnName(code) {
@@ -905,8 +905,8 @@ B.liveBuf = [];
 // The same message never repeats: a further rise after "takıyor olabilirsin" says nothing new.
 const LIVE_RULES = { jumpC: 2.0, fastMin: 3, slowMin: 15, settleMin: 5, settleTolC: 0.5, quietMin: 10, tooHotC: 37 };
 const LIVE_MSG = {
-  up: 'Korseni takıyor olabilirsin, anlamaya çalışıyorum.',
-  again: 'Korseni yeniden takıyor olabilirsin, anlamaya çalışıyorum.',
+  up: 'Korseni takıyor olabilirsin.',
+  again: 'Korseni yeniden takıyor olabilirsin.',
   down: 'Korseni çıkarmış olabilirsin.',
   unsure: 'Şu an emin değilim; ortam ısınıyor olabilir (araba, kalorifer, güneş).',
   on: 'Korsen takılı görünüyor. Süper gidiyorsun!',
@@ -932,8 +932,8 @@ function noteTrend(r) {
   }
   const kind = ev === 'again' ? 'up' : ev;
   if (ev && kind !== TREND.kind) {
-    TREND.kind = kind; TREND.msg = LIVE_MSG[ev]; TREND.at = now;
-    if (session && session.role === 'family' && screen === 'famHome') toast(TREND.msg);
+    TREND.kind = kind; TREND.msg = LIVE_MSG[ev]; TREND.at = now; TREND.ev = ev;
+    if (session && session.role === 'family' && screen === 'famHome') toast(TREND.msg + (kind === 'unsure' ? '' : ` ${LIVE_RULES.quietMin} dakika içinde tam olarak anlayacağım.`));
   }
   TREND.T = T; TREND.lastT = now;
 }
@@ -941,7 +941,10 @@ function noteTrend(r) {
 function liveStatus(code) {
   if (TREND.code !== code || TREND.T == null) return null;
   const model = modelFor(code), quiet = TREND.lastT - TREND.at > LIVE_RULES.quietMin * 60e3, T = TREND.T;
-  if (!quiet && TREND.msg) return { cls: 'maybe', text: TREND.msg, when: TREND.at };
+  if (!quiet && TREND.msg) {                // a change: say it, and when we will be sure ("10 dakika içinde tam olarak anlayacağım")
+    const left = Math.max(1, Math.ceil((LIVE_RULES.quietMin * 60e3 - (TREND.lastT - TREND.at)) / 60e3));
+    return { cls: 'maybe', text: TREND.kind === 'unsure' ? TREND.msg : `${TREND.msg} ${left} dakika içinde tam olarak anlayacağım.`, when: TREND.at };
+  }
   if (T > LIVE_RULES.tooHotC || T > model.Ton + (model.hotterThanSkinC ?? SkoliAlgo.CFG.hotterThanSkinC)) return { cls: 'maybe', text: LIVE_MSG.unsure };
   if (TREND.kind === 'unsure' && T >= model.thrOff) return { cls: 'maybe', text: LIVE_MSG.unsure };
   if (T >= model.thrOn) return { cls: '', text: LIVE_MSG.on };
