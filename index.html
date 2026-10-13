@@ -99,7 +99,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.17 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.18 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 function btnName(code) {
@@ -903,25 +903,34 @@ B.liveBuf = [];
 //   QUIET (10 min without one of the above): above the calibrated "takılı" line -> takılı görünüyor,
 //                below the "çıkarıldı" line -> takmıyor gibisin; after a slow rise it stays "emin değilim" until it cools.
 // The same message never repeats: a further rise after "takıyor olabilirsin" says nothing new.
-const LIVE_RULES = { jumpC: 2.0, fastMin: 3, slowMin: 15, settleMin: 5, settleTolC: 0.5, quietMin: 10, tooHotC: 37 };
+const LIVE_RULES = { jumpC: 2.0, fastMin: 3, slowMin: 15, settleMin: 5, settleTolC: 0.5, quietMin: 5, tooHotC: 37,
+                     wobbleC: 1.0, jumpyCount: 4, jumpyMin: 15, calmC: 1.5 };
 const LIVE_MSG = {
   up: 'Korseni takıyor olabilirsin.',
   again: 'Korseni yeniden takıyor olabilirsin.',
   down: 'Korseni çıkarmış olabilirsin.',
   unsure: 'Şu an emin değilim; ortam ısınıyor olabilir (araba, kalorifer, güneş).',
+  jumpy: 'Şu an emin değilim; sıcaklık çok değişiyor.',
   on: 'Korsen takılı görünüyor. Süper gidiyorsun!',
   off: 'Şu an korseni takmıyor gibisin.',
 };
-const TREND = { code: null, raw: [], pts: [], kind: null, msg: null, at: 0, lastFast: 0, lastFastDir: null };
+const TREND = { code: null };
+function trendReset(code) { Object.assign(TREND, { code, raw: [], pts: [], kind: null, msg: null, ev: null, at: 0, lastFast: 0, lastFastDir: null, ext: null, bumps: [], steady: null, T: null, lastT: 0 }); }
 function noteTrend(r) {
   if (r.skin === null || !isFinite(r.skin)) return;
   const now = r.t || Date.now(), R = LIVE_RULES, min = m => m * 60e3;
-  if (TREND.code !== r.code) Object.assign(TREND, { code: r.code, raw: [], pts: [], kind: null, msg: null, at: 0, lastFast: 0, lastFastDir: null });
+  if (TREND.code !== r.code) trendReset(r.code);
   TREND.raw.push(r.skin); if (TREND.raw.length > 5) TREND.raw.shift();
   const b = TREND.raw.slice().sort((x, y) => x - y), T = b[b.length >> 1];
   TREND.pts.push({ t: now, T }); TREND.pts = TREND.pts.filter(p => p.t >= now - min(R.slowMin + 1));
   const win = m => TREND.pts.filter(p => p.t >= now - min(m)).map(p => p.T);
   const fast = win(R.fastMin), lo3 = Math.min(...fast), hi3 = Math.max(...fast);
+  const say = (ev, kind) => {
+    TREND.kind = kind; TREND.ev = ev; TREND.msg = LIVE_MSG[ev]; TREND.at = now; TREND.ext = T;
+    if (session && session.role === 'family' && screen === 'famHome') toast(TREND.msg + (kind === 'up' || kind === 'down' ? ` ${R.quietMin} dakika içinde tam olarak anlayacağım.` : ''));
+  };
+  const bump = () => { TREND.bumps.push(now); TREND.bumps = TREND.bumps.filter(t => t >= now - min(R.jumpyMin)); };
+  // 1) a big change (or too hot / slow warming)
   let ev = null;
   if (T > R.tooHotC) ev = 'unsure';
   else if (T - lo3 >= R.jumpC) { ev = TREND.lastFastDir === 'down' ? 'again' : 'up'; TREND.lastFast = now; TREND.lastFastDir = 'up'; }
@@ -931,25 +940,40 @@ function noteTrend(r) {
     if (T - lo15 >= R.jumpC && hi5 - T <= R.settleTolC) ev = 'unsure';
   }
   const kind = ev === 'again' ? 'up' : ev;
-  if (ev && kind !== TREND.kind) {
-    TREND.kind = kind; TREND.msg = LIVE_MSG[ev]; TREND.at = now; TREND.ev = ev;
-    if (session && session.role === 'family' && screen === 'famHome') toast(TREND.msg + (kind === 'unsure' ? '' : ` ${LIVE_RULES.quietMin} dakika içinde tam olarak anlayacağım.`));
+  if (ev && kind !== TREND.kind && TREND.kind !== 'jumpy') { bump(); say(ev, kind); }
+  // 2) during the countdown, a turn back of 1 °C restarts the wait (the change was not clean)
+  else if ((TREND.kind === 'up' || TREND.kind === 'down') && now - TREND.at < min(R.quietMin)) {
+    if (TREND.kind === 'up') { TREND.ext = Math.max(TREND.ext, T); if (TREND.ext - T >= R.wobbleC) { bump(); TREND.at = now; TREND.ext = T; } }
+    else { TREND.ext = Math.min(TREND.ext, T); if (T - TREND.ext >= R.wobbleC) { bump(); TREND.at = now; TREND.ext = T; } }
+  }
+  // 3) too many changes and restarts in 15 min -> "sıcaklık çok değişiyor" until it calms down (< 1.5 °C range for 5 min)
+  if (TREND.kind !== 'jumpy' && TREND.bumps.length >= R.jumpyCount) say('jumpy', 'jumpy');
+  else if (TREND.kind === 'jumpy') {
+    const q = win(R.quietMin);
+    if (now - TREND.at >= min(R.quietMin) && Math.max(...q) - Math.min(...q) < R.calmC) { TREND.kind = null; TREND.msg = null; TREND.bumps = []; TREND.at = now - min(R.quietMin) - 1; }
   }
   TREND.T = T; TREND.lastT = now;
 }
-// what to show now: a recent change (neutral grey) or, when it has been quiet, the steady state
+// what to show now: a recent change (neutral grey, with a countdown) or, once it has been quiet, the steady state
 function liveStatus(code) {
   if (TREND.code !== code || TREND.T == null) return null;
-  const model = modelFor(code), quiet = TREND.lastT - TREND.at > LIVE_RULES.quietMin * 60e3, T = TREND.T;
-  if (!quiet && TREND.msg) {                // a change: say it, and when we will be sure ("10 dakika içinde tam olarak anlayacağım")
-    const left = Math.max(1, Math.ceil((LIVE_RULES.quietMin * 60e3 - (TREND.lastT - TREND.at)) / 60e3));
-    return { cls: 'maybe', text: TREND.kind === 'unsure' ? TREND.msg : `${TREND.msg} ${left} dakika içinde tam olarak anlayacağım.`, when: TREND.at };
+  const R = LIVE_RULES, model = modelFor(code), T = TREND.T, quiet = TREND.lastT - TREND.at > R.quietMin * 60e3;
+  if (TREND.kind === 'jumpy') return { cls: 'maybe', text: LIVE_MSG.jumpy, when: TREND.at };
+  if (!quiet && (TREND.kind === 'up' || TREND.kind === 'down')) {
+    const left = Math.max(1, Math.ceil((R.quietMin * 60e3 - (TREND.lastT - TREND.at)) / 60e3));
+    return { cls: 'maybe', text: `${TREND.msg} ${left} dakika içinde tam olarak anlayacağım.`, when: TREND.at };
   }
-  if (T > LIVE_RULES.tooHotC || T > model.Ton + (model.hotterThanSkinC ?? SkoliAlgo.CFG.hotterThanSkinC)) return { cls: 'maybe', text: LIVE_MSG.unsure };
-  if (TREND.kind === 'unsure' && T >= model.thrOff) return { cls: 'maybe', text: LIVE_MSG.unsure };
-  if (T >= model.thrOn) return { cls: '', text: LIVE_MSG.on };
-  if (T <= model.thrOff) return { cls: 'off', text: LIVE_MSG.off };
-  return TREND.msg ? { cls: 'maybe', text: TREND.msg, when: TREND.at } : null;
+  if (T > R.tooHotC || T > model.Ton + (model.hotterThanSkinC ?? SkoliAlgo.CFG.hotterThanSkinC)) return { cls: 'maybe', text: LIVE_MSG.unsure };
+  if (TREND.kind === 'unsure') {             // warmed slowly: stay "emin değilim" until it has cooled 1 °C below where that started
+    if (T >= TREND.ext - 1.0) return { cls: 'maybe', text: LIVE_MSG.unsure };
+    TREND.kind = null; TREND.steady = null;
+  }
+  // steady state with a band in between (like a thermostat): above the takılı line = on, below the çıkarıldı line = off,
+  // in between it keeps what it said last, so small ups and downs don't flip the message
+  if (T >= model.thrOn) TREND.steady = 'on';
+  else if (T <= model.thrOff) TREND.steady = 'off';
+  else if (!TREND.steady) TREND.steady = TREND.kind === 'up' ? 'on' : TREND.kind === 'down' ? 'off' : null;
+  return TREND.steady === 'on' ? { cls: '', text: LIVE_MSG.on } : TREND.steady === 'off' ? { cls: 'off', text: LIVE_MSG.off } : { cls: 'maybe', text: 'Şu an emin değilim.' };
 }
 function noteLive(r) {
   noteTrend(r); const cut = Date.now() - 15 * 60e3; B.liveBuf = B.liveBuf.filter(x => x.code === r.code && x.t > cut); B.liveBuf.push(r); }
