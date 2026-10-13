@@ -97,7 +97,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.14 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.15 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 function btnName(code) {
@@ -891,14 +891,14 @@ function rawChartSvg(recs, model, t0, t1, o = {}) {
 // ---------- live temperature (optional; needs the button nearby) ----------
 B.liveBuf = [];
 // ---------- warming / cooling words for the family (no numbers are shown) ----------
-// more than 1 °C up from the lowest point -> "putting the brace on"; more than 1 °C down from the highest point -> "took it off".
-// The same message never comes twice in a row (a further rise from 33 to 34 °C after "putting on" says nothing).
+// more than 2 °C up from the lowest point -> "putting the brace on" ("again" after a removal); more than 2 °C down from
+// the highest point -> "took it off". The same message never comes twice in a row (a further rise after "putting on" says nothing).
 const TREND = { code: null, dir: null, lo: null, hi: null, buf: [], msg: null, at: 0 };
-const TREND_C = 1.0;
-const TREND_MSG = { up: 'Korseyi takmaya başladığını görüyorum.', down: 'Korseyi çıkarttın sanırsam.' };
+const TREND_C = 2.0;
+const TREND_MSG = { up: 'Korseyi takmaya başladığını görüyorum.', again: 'Korseni tekrar takıyorsun sanırım.', down: 'Korseni çıkarttın sanırım.' };
 function noteTrend(r) {
   if (r.skin === null || !isFinite(r.skin)) return;
-  if (TREND.code !== r.code) Object.assign(TREND, { code: r.code, dir: null, lo: null, hi: null, buf: [], msg: null, at: 0 });
+  if (TREND.code !== r.code) Object.assign(TREND, { code: r.code, dir: null, lo: null, hi: null, buf: [], msg: null, at: 0, saidDown: false });
   TREND.buf.push(r.skin); if (TREND.buf.length > 5) TREND.buf.shift();
   const b = TREND.buf.slice().sort((x, y) => x - y), T = b[b.length >> 1];       // median of the last 5 readings (10 s): no single spike counts
   if (TREND.lo === null) { TREND.lo = TREND.hi = T; return; }
@@ -906,7 +906,7 @@ function noteTrend(r) {
   let said = null;
   if (TREND.dir !== 'up' && T - TREND.lo > TREND_C) { TREND.dir = said = 'up'; TREND.hi = T; }
   else if (TREND.dir !== 'down' && TREND.hi - T > TREND_C) { TREND.dir = said = 'down'; TREND.lo = T; }
-  if (said) { TREND.msg = TREND_MSG[said]; TREND.at = Date.now(); if (session && session.role === 'family' && screen === 'famHome') toast(TREND.msg); }
+  if (said) { TREND.msg = TREND_MSG[said === 'up' && TREND.saidDown ? 'again' : said]; TREND.at = Date.now(); if (said === 'down') TREND.saidDown = true; if (session && session.role === 'family' && screen === 'famHome') toast(TREND.msg); }
 }
 function noteLive(r) {
   noteTrend(r); const cut = Date.now() - 15 * 60e3; B.liveBuf = B.liveBuf.filter(x => x.code === r.code && x.t > cut); B.liveBuf.push(r); }
@@ -925,6 +925,7 @@ function liveInner(code) {
     <div class="stat"><span>Nem</span><b>${r.rh !== null ? Math.round(r.rh) + ' %' : '–'}</b></div>
     <div class="stat"><span>Kapak (çip)</span><b>${isFinite(r.chip) ? r.chip.toFixed(1) + ' °C' : '–'}</b></div>
     <div class="stat"><span>Algoritma şu an</span><b>${st}</b></div></div>
+    ${TREND.msg && TREND.code === code && Date.now() - TREND.at < 30 * 60e3 ? `<div class="note" style="margin-top:8px"><b style="margin:0">${esc(TREND.msg)}</b><span class="small">Ailenin gördüğü mesaj · ${ago(TREND.at)}</span></div>` : ''}
     ${buf.length >= 2 ? `<div style="margin-top:8px">${rawChartSvg(buf, model, Date.now() - 10 * 60e3, Date.now(), { h: 110, label: 'Son 10 dakika' })}</div><p class="legend">Son 10 dakika, her 2 saniyede bir.</p>` : ''}`;
 }
 function liveSection(code, always) {
