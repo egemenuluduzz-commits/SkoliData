@@ -99,7 +99,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.18 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.19 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 function btnName(code) {
@@ -1302,6 +1302,7 @@ SRV.rpc = (fn, args) => sv(SRV.sb.rpc(fn, args || {}));
 
 // family: after every sync, upload the per-day hours and the button's health (never raw readings)
 window.onSynced = async code => {
+  if (SRV.on && SRV.profile && (SRV.profile.role === 'owner' || SRV.profile.role === 'clinician')) return SRV.uploadRawStaff(code);
   if (!SRV.on || !SRV.profile || SRV.profile.role !== 'family' || SRV.profile.button_code !== code) return;
   const days = Object.values(DAYCACHE[code] || {}).filter(d => d.dataMs > 0 && !d.fromServer);
   const rows = days.map(d => ({ family_id: SRV.user.id, day: d.key, worn_min: Math.round(d.ms / 6e4), unsure_min: Math.round(d.unsureMs / 6e4),
@@ -1324,6 +1325,19 @@ SRV.uploadRaw = async code => {
       updated_at: new Date().toISOString() }, { onConflict: 'family_id,button_code,day' }));
   }
   if (lsGet(k, null) === dirty) lsDel(k);       // newer readings that arrived meanwhile stay marked
+};
+// a clinician's or the owner's phone that synced the button keeps the server's raw readings fresh too
+// (the server keeps whichever file for a day has more readings)
+SRV.uploadRawStaff = async code => {
+  const fid = SRV.profile.role === 'owner' ? ((SRV.owner.families || []).find(f => f.button_code === code) || {}).id : (profiles()[code] || {}).familyId;
+  const k = 'sk.rawdirty.' + code, dirty = lsGet(k, null); if (!fid || dirty === null) return;
+  for (let a = Math.max(startOfDay(dirty), addDays(startOfDay(Date.now()), -7)); a <= Date.now(); a = addDays(a, 1)) {
+    const recs = await getRecs(code, a, addDays(a, 1) - 1); if (!recs.length) continue;
+    const e = await encodeDay(recs);
+    await SRV.rpc('staff_upload_raw', { p_family: fid, p_code: code, p_day: dateKey(a), p_n: recs.length, p_enc: e.enc, p_data: e.data });
+  }
+  if (lsGet(k, null) === dirty) lsDel(k);
+  for (const key in RAWCACHE) delete RAWCACHE[key];
 };
 // calibration result (both ok and failed) goes to the server; a clinician's result reaches the family's phone
 window.onCalibrated = async (code, res, by, fidIn) => {
@@ -1958,8 +1972,9 @@ if (SRV.on) {
   ACTIONS.ownerRawCsv = async () => {
     const f = SRV.owner.families.find(x => x.id === params.id), t1 = Date.now() + 60e3, t0 = Date.now() - 864e5;
     try {
-      const rows = await SRV.rpc('owner_raw_days', { p_family: f.id, p_from: dateKey(t0), p_to: dateKey(t1) });
-      let recs = []; for (const row of rows) recs = recs.concat(await decodeRawRow(row, row.button_code));
+      let recs;
+      if (f.button_code) recs = await getRecsAny(f.button_code, t0, t1, f.id);          // this device's own readings + the server's
+      else { const rows = await SRV.rpc('owner_raw_days', { p_family: f.id, p_from: dateKey(t0), p_to: dateKey(t1) }); recs = []; for (const row of rows) recs = recs.concat(await decodeRawRow(row, row.button_code)); }
       recs = recs.filter(r => r.t >= t0 && r.t <= t1).sort((a, b) => a.t - b.t);
       if (!recs.length) { toast('Sunucuda son 24 saatin ölçümü yok.'); return; }
       const name = (f.button_code || f.last_button_code || 'aile'), t00 = recs[0].t;
@@ -2002,6 +2017,13 @@ if (SRV.on) {
 // keep-alive for firmware v0.5: the button closes a connection after 20 min without any message (so a forgotten
 // phone can't drain the coin cell). While the app is open on screen and connected, say "k" every 4 min.
 setInterval(() => { if (B.connected && !B.syncing && document.visibilityState === 'visible') send('k'); }, 240000);
+// while a phone stays connected, the live readings reach the server every 5 minutes (not only at a sync),
+// so other devices (PC, clinician, owner) see them too
+setInterval(async () => {
+  if (!B.connected || B.syncing || !B.info || !window.SRV_ON || !window.onSynced) return;
+  const code = B.info.code;
+  try { await computeDays(code, 2); await window.onSynced(code); } catch (e) { blog('sunucu: ' + (e.message || e)); }
+}, 300000);
 setInterval(() => { if (screen === 'famHome' || screen === 'clinPatient') { const c = screen === 'famHome' ? session && session.code : params.code; if (c && B.connected) computeDays(c, 2).then(() => { refresh(); }); } }, 60000);
 </script>
 </body>
