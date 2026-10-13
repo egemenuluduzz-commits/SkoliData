@@ -97,7 +97,20 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.13 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.14 · algo ' + SkoliAlgo.INFO.id;
+// ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
+const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
+function btnName(code) {
+  const l = window.SRV_ON && typeof SRV !== 'undefined' && SRV.labels && SRV.labels[code]; if (l) return l;
+  const n = getMeta(code).bleName; return n && n !== code ? n : null;
+}
+function btnText(code) {
+  if (!code) return '';
+  const n = btnName(code);
+  if (!window.SRV_ON) return n || code;                    // demo mode without a server: there are no numbered names
+  return isOwnerView() ? (n ? `${n} · ${code}` : code) : (n || 'SkoliData butonu');
+}
+const csvName = c => (isOwnerView() ? [btnName(c), c] : [btnName(c) || 'buton']).filter(Boolean).join('_').replace(/\s+/g, '_');
 // clinician accounts made by SkoliData use a user name; behind the scenes it is <name>@klinisyen.skolidata.app (no mail is ever sent)
 const CLIN_DOMAIN = '@klinisyen.skolidata.app';
 const clinLoginEmail = u => { u = (u || '').trim().toLowerCase(); return u.includes('@') ? u : u + CLIN_DOMAIN; };
@@ -297,6 +310,14 @@ function onBytes(u8) {
     if (line) handleLine(line);
   }
 }
+// a button that has no name yet (firmware 0.8+) gets the name the server numbered for it
+async function nameButtonIfNew() {
+  if (!B.connected || !B.info || !fwAtLeast(B.info.fw, 0, 8)) return;
+  const info = B.info, code = info.code, label = window.SRV_ON && typeof SRV !== 'undefined' && SRV.labels && SRV.labels[code];
+  if (!label || (info.name && info.name !== code)) return;
+  B.svc = null; await send('n:' + label); await waitFor(() => B.svc, 3000);
+  if (B.svc === 'N ok') { info.name = label; const m = getMeta(code); m.bleName = label; setMeta(code, m); blog('buton adı verildi: ' + label); }
+}
 function wallTime(secs) { return B.info.at - (B.info.up - secs) * 1000; }
 function decodeRec(dv, o) {
   const c = B.chunk; const idx = c.from + c.got++;
@@ -359,11 +380,12 @@ async function syncAll(opts = {}) {
   for (let k = 0; k < 6 && !B.info; k++) { await send('i'); await waitFor(() => B.info, 1500); }
   if (!B.info) { B.syncing = false; toast('Buton yanıt vermedi.'); refresh(); return false; }
   if (B.info.old) { B.syncing = false; alert('Bu butonda eski yazılım var (' + B.info.fw + '). Güncel buton yazılımını yükle.'); refresh(); return false; }
-  let refuse = opts.expect && B.info.code !== opts.expect ? `Bu buton (${B.info.code}) senin hesabına bağlı değil. Hesabın yalnızca kendi butonunla (${opts.expect}) çalışır.` : null;
+  let refuse = opts.expect && B.info.code !== opts.expect ? `Bu buton${B.info.name && B.info.name !== B.info.code ? ' (' + B.info.name + ')' : ''} senin hesabına bağlı değil. Hesabın yalnızca kendi butonunla (${btnText(opts.expect)}) çalışır.` : null;
   if (!refuse && opts.allow) { try { refuse = await opts.allow(B.info.code); } catch (e) { refuse = (typeof trErr === 'function' ? trErr(e) : String(e)); } }
   if (refuse) { blog('reddedildi: ' + B.info.code); const info = B.info; bleDisconnect(); B.info = null; B.live = null; refresh(); alert(refuse); B.refused = info.code; return false; }
   { const m = getMeta(B.info.code); if (B.info.name && m.bleName !== B.info.name) { m.bleName = B.info.name; setMeta(B.info.code, m); } }
   send('w' + Math.floor(Date.now() / 1000));   // leave a time stamp in the button (dates readings after a later restart)
+  nameButtonIfNew();                           // a new button gets its number name ("SkoliData 3") the first time we know it
   if (opts.infoOnly) { B.syncing = false; refresh(); return true; }
   const code = B.info.code, meta = getMeta(code);
   // the button has no clock: its readings count seconds since it was switched on ("boot"). At every sync we
@@ -502,7 +524,7 @@ SCREENS.famConnect = () => `<main>${backBtn('login')}
 SCREENS.famPass = p => `<main>${backBtn('famConnect')}
   <div class="steps"><i class="on"></i><i></i><i></i><i></i></div>
   <h1>Şifre oluştur</h1>
-  <p class="sub">Butonun: <b>${esc(p.code)}</b>. Giriş yaparken bu kodu ve şifreni kullanacaksın.</p>
+  <p class="sub">Butonun: <b>${esc(btnText(p.code))}</b>. Giriş yaparken butona bağlanıp şifreni gireceksin.</p>
   <label class="f">Şifre (en az 8 karakter)<input class="in" id="pw1" type="password" autocomplete="new-password"></label>
   <label class="f">Şifre tekrar<input class="in" id="pw2" type="password" autocomplete="new-password"></label>
   <p class="err" id="err"></p>
@@ -710,7 +732,7 @@ SCREENS.famSettings = () => {
   <section class="card list">
     <div class="li"><span class="k">Günlük hedef</span><span class="v">${p.goal || 16} saat</span></div>
     <div class="stepper" style="padding:6px 0 10px"><button data-act="famGoalAdj" data-arg="-1" aria-label="Azalt">–</button><span class="small">Hedefi değiştir</span><button data-act="famGoalAdj" data-arg="1" aria-label="Artır">+</button></div>
-    <div class="li"><span class="k">Butonum</span><span class="v">${esc(code)}</span></div>
+    <div class="li"><span class="k">Butonum</span><span class="v">${esc(btnText(code))}</span></div>
     <button class="li" data-act="famResetStart"><span class="k">Butonu değiştir</span><span class="v">›</span></button>
     <div class="li" style="flex-direction:column;align-items:stretch"><div class="row"><span class="k">Pil</span><span class="v">${esc(bat.txt)}</span></div><div class="gauge" aria-hidden="true">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= bat.seg ? 'on' : ''}"></i>`).join('')}</div></div>
     <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model ? fmtDate(model.createdAt) : 'yapılmadı'}</span></div>
@@ -727,7 +749,7 @@ SCREENS.famSettings = () => {
 };
 SCREENS.famReset = () => `<main>${backBtn('famSettings')}
   <h1>Son uyarı</h1>
-  <p class="sub">Hesabın <b>${esc(session.code)}</b> butonundan ayrılacak.</p>
+  <p class="sub">Hesabın <b>${esc(btnText(session.code))}</b> butonundan ayrılacak.</p>
   <section class="card list">
     <div class="li"><span class="k">Bu buton artık senin hesabına veri göndermez.</span></div>
     <div class="li"><span class="k">Buton başka bir aileye verilebilir.</span></div>
@@ -776,7 +798,7 @@ function miniBars(code, goalMs) {
 let clinCodes = knownCodes;
 SCREENS.clinList = () => {
   const codes = clinCodes(), P = profiles();
-  const rows = codes.map(c => { const s = summary(c), g = (P[c] && P[c].goal) || 16, nm = P[c] && P[c].displayName; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(nm || c)}</span><br><span class="small">${nm ? esc(P[c].noButton ? 'buton yok' : c) + ' · ' : ''}${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : s.todayData ? 'bugün ' + fmtH1(s.todayMs) + ' sa' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven ? '<span class="chip">Düzensiz</span>' : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
+  const rows = codes.map(c => { const s = summary(c), g = (P[c] && P[c].goal) || 16, nm = P[c] && P[c].displayName; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(nm || btnText(c))}</span><br><span class="small">${nm ? esc(P[c].noButton ? 'buton yok' : btnText(c)) + ' · ' : ''}${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : s.todayData ? 'bugün ' + fmtH1(s.todayMs) + ' sa' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven ? '<span class="chip">Düzensiz</span>' : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
   return `<main>
   <header class="row"><div><div class="sub">${esc((CLINICIANS.find(x => x.u === session.u) || {}).name || '')} <span class="chip">Doğrulanmış</span></div><h1>Hastalarım</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
   <section class="card list">${rows || '<p class="small">Bu telefonda henüz kayıtlı buton yok. Klinikte butonu bağlayarak başla.</p>'}</section>
@@ -792,7 +814,7 @@ SCREENS.clinPatient = p => {
   const hist = (prof.goalHistory || []).slice().reverse().map(h => `<div class="li"><span class="k">${h.to} sa</span><span class="v">${h.by === 'clinician' ? 'klinisyen' : 'aile'} · ${fmtDate(h.at)}</span></div>`).join('');
   const isLive = B.connected && B.info && B.info.code === code;
   return `<main>${backBtn('clinList', 'Hastalarım')}
-  <h1>${esc(code)}</h1>
+  <h1>${esc(btnText(code))}</h1>
   <div class="grid2"><div class="card stat"><span>${s.daysWithData ? '14 gün ortalama' : 'Bugün'}</span><b>${fmtH1(s.daysWithData ? s.avg : s.todayMs)} sa</b></div><div class="card stat"><span>Hedef</span><b>${g} sa</b></div></div>
   ${s.uneven ? '<div class="note"><b>Düzensiz</b>Son 14 günde günlük süreler arasında büyük fark var.</div>' : ''}
   <section class="card"><b>Son 14 gün</b>${barsSvg(days, goalMs, 1)}</section>
@@ -812,8 +834,8 @@ SCREENS.clinPatient = p => {
 SCREENS.clinPatient.after = p => { if (!DAYCACHE[p.code]) computeDays(p.code).then(refresh); };
 SCREENS.raw = p => {
   const code = p.code, meta = getMeta(code), model = modelFor(code), range = p.range || 6;
-  return `<main>${p.backTo ? backTo(p.backLabel || code) : backBtn('clinPatient', code)}
-  <h1>Ham veri</h1><p class="sub" style="margin-top:-8px">${esc(code)} · klinisyen ve yönetim ekranı, ailelere gösterilmez</p>
+  return `<main>${p.backTo ? backTo(p.backLabel || btnText(code)) : backBtn('clinPatient', btnText(code))}
+  <h1>Ham veri</h1><p class="sub" style="margin-top:-8px">${esc(btnText(code))} · klinisyen ve yönetim ekranı, ailelere gösterilmez</p>
   ${liveSection(code, true)}
   <section class="card"><div class="row"><b>Sıcaklık</b><span class="seg">${[6, 24, 72].map(h => `<button class="chip${h === range ? ' on' : ''}" data-act="rawRange" data-arg="${h}">${h === 72 ? '3 gün' : h + ' sa'}</button>`).join('')}</span></div>
     <div id="rawChart" style="margin-top:8px">${RAWCHART.key === code + '|' + range && RAWCHART.html ? RAWCHART.html : '<p class="small">Yükleniyor…</p>'}</div>
@@ -927,8 +949,8 @@ SCREENS.calPage = p => {
       <label class="f" style="margin-top:12px">${esc(x.label)} (${esc(x.unit)})<input class="in" type="number" inputmode="decimal" data-param="${esc(x.key)}" step="${x.step}" min="${x.min}" max="${x.max}" value="${esc(String(vals[x.key]))}"></label>
       <p class="help">${esc(x.help || '')}</p>`).join('')}</section>`).join('');
   const hist = CALP.hist.map(h => `<div class="li"><span><span class="k">${fmtDate(h.at)} ${new Date(h.at).toTimeString().slice(0, 5)}</span><br><span class="small">${whoTR(h.by)} · ${h.kind === 'manual' ? 'elle ayar' : 'ölçüm'}${h.ok === false ? ' · başarısız' : ''}</span></span><span class="v small">${h.model && SkoliAlgo.accepts(h.model) ? esc((SkoliAlgo.facts(h.model).find(f => /eşik/i.test(f.label)) || {}).value || '') : ''}</span></div>`).join('');
-  return `<main>${backTo(p.backLabel || code)}
-  <h1>Kalibrasyon</h1><p class="sub" style="margin-top:-8px">${esc(p.name || '')}${p.name ? ' · ' : ''}${esc(code)}</p>
+  return `<main>${backTo(p.backLabel || btnText(code))}
+  <h1>Kalibrasyon</h1><p class="sub" style="margin-top:-8px">${esc(p.name || '')}${p.name ? ' · ' : ''}${esc(btnText(code))}</p>
   <section class="card"><b>${esc(SkoliAlgo.INFO.name)}</b><p class="help" style="margin-top:6px">${esc(SkoliAlgo.INFO.summary)}</p></section>
   <section class="card list"><div class="li"><span class="k">Şu anki ayar</span><span class="v">${cur.isDefault ? 'varsayılan (kalibrasyon yok)' : `${fmtDate(cur.createdAt)} · ${whoTR(cur.by)} · ${cur.kind === 'manual' ? 'elle' : 'ölçüm'}`}</span></div>
     ${SkoliAlgo.facts(cur).map(f => `<div class="li"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join('')}</section>
@@ -1034,7 +1056,7 @@ const ACTIONS = {
   forgot: () => alert('Şifreleri yalnızca SkoliData sıfırlayabilir. Bize ulaş.\n\n' + CONTACT_TXT),
   // change button: warning 1 (dialog) -> warning 2 (screen + password) -> account without a button
   famResetStart: () => {
-    if (!confirm(`Butonunu değiştirmek istiyor musun?\n\nHesabın ${session.code} butonundan ayrılacak ve yeni bir buton bağlayana kadar saatlerin kaydedilmeyecek.`)) return;
+    if (!confirm(`Butonunu değiştirmek istiyor musun?\n\nHesabın ${btnText(session.code)} butonundan ayrılacak ve yeni bir buton bağlayana kadar saatlerin kaydedilmeyecek.`)) return;
     go('famReset');
   },
   famResetGo: async () => {
@@ -1058,7 +1080,7 @@ const ACTIONS = {
     const m = getMeta(c); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(c, m);
     session = { role: 'family', code: c }; ssSet('sk.session', session); delete OLDLOADED[c];
     CAL.phase = null; CAL.result = null; CAL.code = c; CAL.by = 'family';
-    go('calib'); toast('Yeni butonun bağlandı: ' + c);
+    go('calib'); toast('Yeni butonun bağlandı: ' + btnText(c));
   },
   famGoalAdj: d => { const P = profiles(), p = P[session.code]; const to = Math.min(23, Math.max(1, (p.goal || 16) + +d)); if (to === p.goal) return; p.goalHistory = (p.goalHistory || []).concat({ from: p.goal, to, by: 'family', at: Date.now() }); p.goal = to; saveProfiles(P); render(); },
   showConsent: () => go('consentView'),
@@ -1073,7 +1095,7 @@ const ACTIONS = {
   calOpen: by => { if (by === 'family' && familyNeedsButton()) return go('famNewButton'); CAL.by = by; CAL.code = by === 'clinician' ? params.code : session.code; CAL.fid = null; CAL.phase = null; CAL.result = null; go('calib', params); },
   calStart: () => {
     if (!B.connected || !B.info) return;
-    if (B.info.code !== CAL.code) { alert(`Bağlı buton (${B.info.code}) bu hesaba ait değil (${CAL.code}).`); return; }
+    if (B.info.code !== CAL.code) { alert(`Bağlı buton bu hesaba ait değil (bu hesabın butonu: ${btnText(CAL.code)}).`); return; }
     CAL.buf = {}; calBeginStep(0);
   },
   calStepStart: () => { CAL.phase = 'run'; CAL.start = Date.now(); CAL.buf[CAL.key] = []; calTick(); render(); },
@@ -1090,7 +1112,7 @@ const ACTIONS = {
     go('clinPatient', { code });
   },
   openPatient: c => go('clinPatient', { code: c }),
-  openRaw: c => { const pr = profiles()[c] || {}; go('raw', { code: c, fid: pr.familyId, name: pr.displayName || '', backTo: { screen, params: Object.assign({}, params) }, backLabel: pr.displayName || c }); },
+  openRaw: c => { const pr = profiles()[c] || {}; go('raw', { code: c, fid: pr.familyId, name: pr.displayName || '', backTo: { screen, params: Object.assign({}, params) }, backLabel: pr.displayName || btnText(c) }); },
   clinGoal: d => {
     const P = profiles(), code = params.code, p = P[code] || (P[code] = { goal: 16, goalHistory: [] });
     const from = p.goal || 16, to = Math.min(23, Math.max(1, from + +d)); if (to === from) return;
@@ -1101,12 +1123,12 @@ const ACTIONS = {
     const recs = await getRecsAny(c, Date.now() - 864e5, Date.now() + 60e3);
     if (!recs.length) { toast('Son 24 saatte ölçüm yok. Butona bağlanıp senkronize et.'); return; }
     const t0 = recs.length ? recs[0].t : 0;
-    download(`skolidata_${c}_24h.csv`, 'time_s,skin_C,humidity_pct,chip_C,wall_time\n' + recs.map(r => `${((r.t - t0) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip},${new Date(r.t).toISOString()}`).join('\n'));
+    download(`skolidata_${csvName(c)}_24h.csv`, 'time_s,skin_C,humidity_pct,chip_C,wall_time\n' + recs.map(r => `${((r.t - t0) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip},${new Date(r.t).toISOString()}`).join('\n'));
   },
   csvCal: c => {
     const raw = lsGet('sk.calraw.' + c, null); if (!raw) { toast('Kayıtlı kalibrasyon yok.'); return; }
     const t0 = (raw.off[0] || raw.on[0] || [0])[0], line = ph => r => `${((r[0] - t0) / 1000).toFixed(0)},${r[1] ?? ''},${r[2] ?? ''},${ph}`;
-    download(`skolidata_${c}_calibration.csv`, 'time_s,skin_C,humidity_pct,phase\n' + raw.off.map(line('off')).concat(raw.on.map(line('on'))).join('\n'));
+    download(`skolidata_${csvName(c)}_calibration.csv`, 'time_s,skin_C,humidity_pct,phase\n' + raw.off.map(line('off')).concat(raw.on.map(line('on'))).join('\n'));
   },
 };
 Object.assign(ACTIONS, {
@@ -1123,11 +1145,11 @@ Object.assign(ACTIONS, {
     const h = params.range || 6, recs = await getRecsAny(c, Date.now() - h * 3.6e6, Date.now() + 60e3, params.fid);
     if (!recs.length) { toast('Bu aralıkta ölçüm yok. Butona bağlanıp senkronize et.'); return; }
     const t0 = recs[0].t;
-    download(`skolidata_${c}_${h}h.csv`, 'time_s,skin_C,humidity_pct,chip_C,wall_time\n' + recs.map(r => `${((r.t - t0) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip},${new Date(r.t).toISOString()}`).join('\n'));
+    download(`skolidata_${csvName(c)}_${h}h.csv`, 'time_s,skin_C,humidity_pct,chip_C,wall_time\n' + recs.map(r => `${((r.t - t0) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip},${new Date(r.t).toISOString()}`).join('\n'));
   },
   openCal: c => {
     const pr = profiles()[c] || {}, from = { screen, params: Object.assign({}, params) };
-    go('calPage', { code: c, fid: params.fid || pr.familyId, name: params.name || pr.displayName || '', backTo: from, backLabel: screen === 'raw' ? 'Ham veri' : (params.name || pr.displayName || c) });
+    go('calPage', { code: c, fid: params.fid || pr.familyId, name: params.name || pr.displayName || '', backTo: from, backLabel: screen === 'raw' ? 'Ham veri' : (params.name || pr.displayName || btnText(c)) });
   },
   calRange: h => { CALP.range = +h; CALP.recsKey = ''; render(); },
   calUndo: () => { CALP.vals = null; render(); },
@@ -1173,7 +1195,7 @@ function download(name, text) {
 // ================= server (Supabase) — active only when config.js is filled in =================
 const SKCFG = window.SKOLI_CONFIG || {};
 const SRV = { on: !!(SKCFG.supabaseUrl && SKCFG.supabaseAnonKey && window.supabase), sb: null, user: null, profile: null,
-              lastPull: 0, patients: [], clinicians: [], detail: {}, owner: { clinicians: [], health: [], cities: [], audit: [], families: [] } };
+              lastPull: 0, patients: [], clinicians: [], detail: {}, labels: {}, owner: { clinicians: [], health: [], cities: [], audit: [], families: [] } };
 if (SRV.on) SRV.sb = window.supabase.createClient(SKCFG.supabaseUrl, SKCFG.supabaseAnonKey);
 window.SRV_ON = SRV.on;
 // families have no real e-mail: a random login address, found again from the button code at login
@@ -1266,6 +1288,8 @@ SRV.pullFamily = async (force) => {
     if (B.connected && B.info && B.info.code !== code) { bleDisconnect(); B.info = null; B.live = null; }
   }
   SRV.clinicians = await SRV.rpc('my_care_team');
+  await SRV.loadLabels();
+  if (code && SRV.labels[code]) lsSet('sk.lastlabel', SRV.labels[code]);
   try { SRV.doctors = await SRV.rpc('clinician_directory'); } catch (e) { SRV.doctors = SRV.doctors || []; }
   if (!code) return true;
   const P = profiles(), p = P[code] || (P[code] = { createdAt: Date.now() });
@@ -1290,8 +1314,10 @@ SRV.pullFamily = async (force) => {
   return true;
 };
 // clinician: patients + their last 20 days of hours
+SRV.loadLabels = async () => { try { for (const r of await SRV.rpc('button_labels')) SRV.labels[r.code] = r.label; } catch (e) {} };
 SRV.loadPatients = async () => {
   SRV.patients = await SRV.rpc('clinician_patients');
+  await SRV.loadLabels();
   const ids = SRV.patients.map(x => x.family_id);
   const rows = ids.length ? await sv(SRV.sb.from('day_summaries').select('*').in('family_id', ids).gte('day', dateKey(addDays(startOfDay(Date.now()), -20)))) : [];
   const P = profiles();
@@ -1316,6 +1342,7 @@ SRV.loadOwner = async () => {
   const [c, h, ci, a, f] = await Promise.all([SRV.rpc('owner_clinicians'), SRV.rpc('owner_button_health'), SRV.rpc('owner_city_counts'), SRV.rpc('owner_audit_log', { p_limit: 30 }), SRV.rpc('owner_families')]);
   let kinds = []; try { kinds = await SRV.rpc('owner_clinician_kinds'); } catch (e) {}
   c.forEach(x => { const k = kinds.find(y => y.id === x.id); x.kind = k ? k.kind : 'doctor'; });
+  await SRV.loadLabels();
   Object.assign(SRV.owner, { clinicians: c, health: h, cities: ci, audit: a, families: f, loaded: Date.now() });
 };
 async function routeAfterLogin() {
@@ -1337,12 +1364,13 @@ if (SRV.on) {
 
   // ---------- family ----------
   const loginCode = () => (params && params.code) || lsGet('sk.lastcode', null);
+  const loginLabel = () => (params && params.code ? params.name : lsGet('sk.lastlabel', null)) || 'SkoliData butonu';
   SCREENS.famLogin = () => {
     const code = loginCode();
     return `<main>${backBtn('login')}
     <h1>Giriş</h1>
-    ${code ? `<section class="card list"><div class="li"><span class="k">Butonun</span><span class="v">${esc(code)} ✓</span></div></section>
-    <input id="lc" autocomplete="username" value="${esc(code)}" style="position:absolute;opacity:0;height:0;width:0;pointer-events:none" tabindex="-1" aria-hidden="true">
+    ${code ? `<section class="card list"><div class="li"><span class="k">Butonun</span><span class="v">${esc(loginLabel())} ✓</span></div></section>
+    <input id="lc" autocomplete="username" value="${esc(loginLabel())}" style="position:absolute;opacity:0;height:0;width:0;pointer-events:none" tabindex="-1" aria-hidden="true">
     <label class="f">Şifre<input class="in" id="lp" type="password" autocomplete="current-password"></label>
     <p class="err" id="err"></p>
     <button class="btn primary" data-act="famLoginBtn">Giriş yap</button>
@@ -1466,6 +1494,7 @@ if (SRV.on) {
       catch (e) { try { await SRV.rpc('delete_my_account'); } catch (x) {} await SRV.signOut(); throw e; }   // don't leave an empty login behind
       try { await SRV.rpc('update_my_profile', { p_display_name: params.name, p_city: params.city }); } catch (e) {}   // asked again at next login if this failed
       await SRV.loadMe();
+      await SRV.loadLabels(); nameButtonIfNew();
       const P = profiles(); P[code] = { goal, goalHistory: [{ to: goal, by: 'family', at: Date.now() }], createdAt: Date.now(), consentAt: params.consentAt, server: true }; saveProfiles(P);
       const m = getMeta(code); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(code, m);
       session = { role: 'family', code }; ssSet('sk.session', session);
@@ -1480,13 +1509,14 @@ if (SRV.on) {
   ACTIONS.famLoginScan = async () => {
     const ok = await bleConnect({ infoOnly: true });
     if (!ok || !B.info) { render(); return; }
-    const code = B.info.code;
+    const code = B.info.code, name = B.info.name && B.info.name !== code ? B.info.name : null;
     bleDisconnect(); B.info = null; B.live = null;     // free the button again (a wrong password must not keep it busy)
-    go('famLogin', { code });
+    go('famLogin', { code, name });
     const e = $('#lp'); if (e) e.focus();
   };
   ACTIONS.famLoginBtn = async () => {
-    const code = loginCode(), pw = $('#lp').value;
+    if (B.syncing) await waitFor(() => !B.syncing, 15000);   // a button scan is still running: let it finish first
+    const code = loginCode(), pw = ($('#lp') || {}).value || '';
     if (!code) { go('famLogin', {}); return; }
     busy(true);
     try {
@@ -1525,7 +1555,7 @@ if (SRV.on) {
       await SRV.pullFamily(true);
       try { await window.onSynced(c); } catch (e) {}
       CAL.phase = null; CAL.result = null; CAL.code = c; CAL.by = 'family';
-      go('calib'); toast('Yeni butonun bağlandı: ' + c);
+      go('calib'); toast('Yeni butonun bağlandı: ' + btnText(c));
     } catch (e) { alert(String(e.message || e).includes('button_taken') ? TAKEN_MSG : trErr(e)); } finally { busy(false); }
   };
   ACTIONS.famGoalAdj = async d => {
@@ -1550,7 +1580,7 @@ if (SRV.on) {
     if (!confirm('Hesabın ve sunucudaki tüm verilerin kalıcı olarak silinecek. Emin misin?')) return;
     try { await SRV.rpc('delete_my_account'); } catch (e) { alert(trErr(e)); return; }
     const c = session.code, P = profiles();
-    if (lsGet('sk.lastcode', null) === c) lsDel('sk.lastcode');
+    if (lsGet('sk.lastcode', null) === c) { lsDel('sk.lastcode'); lsDel('sk.lastlabel'); }
     if (c) { delete P[c]; saveProfiles(P); ['sk.meta.', 'sk.model.', 'sk.days.', 'sk.calraw.', 'sk.calhist.'].forEach(k => lsDel(k + c)); await deleteCode(c); delete DAYCACHE[c]; }
     await SRV.signOut(); session = null; ssSet('sk.session', null); go('login'); toast('Hesabın silindi.');
   };
@@ -1648,10 +1678,10 @@ if (SRV.on) {
     }
     const name = (profiles()[p.code] || {}).displayName;
     let html = baseClinPatient(p);
-    if (name) html = html.replace(`<h1>${esc(p.code)}</h1>`, `<h1>${esc(name)}</h1><p class="sub" style="margin-top:-8px">${esc(p.code)}</p>`);
+    if (name) html = html.replace(`<h1>${esc(btnText(p.code))}</h1>`, `<h1>${esc(name)}</h1><p class="sub" style="margin-top:-8px">${esc(btnText(p.code))}</p>`);
     if (d && d.cal) html = html.replace(/(<span class="k">Kalibrasyon<\/span><span class="v">)[^<]*/, `$1${fmtDate(Date.parse(d.cal.created_at))} · ${whoTR(d.cal.by_role)}${d.cal.kind === 'manual' ? ' · elle' : ''}`);
     if ((profiles()[p.code] || {}).noButton) {
-      html = html.replace(`<p class="sub" style="margin-top:-8px">${esc(p.code)}</p>`, '<p class="sub" style="margin-top:-8px">Şu an butonu yok</p>')
+      html = html.replace(`<p class="sub" style="margin-top:-8px">${esc(btnText(p.code))}</p>`, '<p class="sub" style="margin-top:-8px">Şu an butonu yok</p>')
         .replace(/<button class="btn secondary" data-act="clinConnect">[^<]*<\/button>/, '')
         .replace(/<button class="btn secondary" data-act="openCal"[^>]*>[^<]*<\/button>/, '')
         .replace('<div class="grid2" id="tools">', '<div class="note"><b>Butonu yok</b>Aile yeni butonunu kendi uygulamasından bağlayabilir; saatleri yeniden gelmeye başlar.</div>\n  <div class="grid2" id="tools">');
@@ -1699,13 +1729,13 @@ if (SRV.on) {
   // the button came back to the clinic: free it (two warnings) so the next family can sign up with it
   ACTIONS.clinRelease = async () => {
     const code = params.code, pr = profiles()[code] || {}, who = pr.displayName || code;
-    if (!confirm(`${code} butonu ${who} hesabından ayrılsın mı?\n\nAilenin geçmiş saatleri ve sizinle paylaşımı kalır. Aile yeni bir buton bağlayana kadar saat kaydedilmez.`)) return;
-    if (!confirm(`Son uyarı: ${code} artık ${who} için veri göndermeyecek ve başka bir aileye verilebilecek. Ayırmak istediğinize emin misiniz?`)) return;
+    if (!confirm(`${btnText(code)} butonu ${who} hesabından ayrılsın mı?\n\nAilenin geçmiş saatleri ve sizinle paylaşımı kalır. Aile yeni bir buton bağlayana kadar saat kaydedilmez.`)) return;
+    if (!confirm(`Son uyarı: ${btnText(code)} artık ${who} için veri göndermeyecek ve başka bir aileye verilebilecek. Ayırmak istediğinize emin misiniz?`)) return;
     try {
       await SRV.rpc('clinician_release_button', { p_family: pr.familyId });
       if (B.connected && B.info && B.info.code === code) bleDisconnect();
       delete profiles()[code]; const P = profiles(); delete P[code]; saveProfiles(P); delete DAYCACHE[code];
-      await SRV.loadPatients(); go('clinList'); toast(`${code} serbest. Yeni aile bu butonla hesap oluşturabilir.`);
+      await SRV.loadPatients(); go('clinList'); toast(`${btnText(code)} serbest. Yeni aile bu butonla hesap oluşturabilir.`);
     } catch (e) { toast(trErr(e)); }
   };
 
@@ -1714,8 +1744,8 @@ if (SRV.on) {
   SCREENS.owner = () => {
     const o = SRV.owner, pending = o.clinicians.filter(c => !c.approved), approved = o.clinicians.filter(c => c.approved);
     const stale = h => !h.last_sync || Date.now() - Date.parse(h.last_sync) > 3 * 864e5;
-    const healthRow = h => `<div class="li"><span><span class="k">${esc(h.code)}</span><br><span class="small">${h.assigned ? esc(h.family_name || 'ailede') : 'boşta'} · ${h.fw ? esc(h.fw) : '–'} · ${h.flash === false ? 'flash yok · ' : ''}${h.last_sync ? ago(Date.parse(h.last_sync)) : 'hiç senkron yok'}</span></span><span class="chip">${!h.assigned ? '⚪ boşta' : stale(h) ? '⚪ 3+ gün yok' : h.mv && h.mv < 2750 ? '🔵 pil az' : '🟢 çalışıyor'}</span></div>`;
-    const famRow = f => `<button class="li" data-act="ownerOpenFam" data-arg="${esc(f.id)}"><span><span class="k">${esc(famName(f))}</span><br><span class="small">${esc(f.city || '')} · ${f.button_code ? esc(f.button_code) : 'buton yok'}${f.clinicians ? ' · ' + f.clinicians + ' klinisyen' : ''}${f.button_code ? ' · ' + (f.last_sync ? ago(Date.parse(f.last_sync)) : 'senkron yok') : ''}</span></span><span class="v">›</span></button>`;
+    const healthRow = h => `<div class="li"><span><span class="k">${esc(btnText(h.code))}</span><br><span class="small">${h.assigned ? esc(h.family_name || 'ailede') : 'boşta'} · ${h.fw ? esc(h.fw) : '–'} · ${h.flash === false ? 'flash yok · ' : ''}${h.last_sync ? ago(Date.parse(h.last_sync)) : 'hiç senkron yok'}</span></span><span class="chip">${!h.assigned ? '⚪ boşta' : stale(h) ? '⚪ 3+ gün yok' : h.mv && h.mv < 2750 ? '🔵 pil az' : '🟢 çalışıyor'}</span></div>`;
+    const famRow = f => `<button class="li" data-act="ownerOpenFam" data-arg="${esc(f.id)}"><span><span class="k">${esc(famName(f))}</span><br><span class="small">${esc(f.city || '')} · ${f.button_code ? esc(btnText(f.button_code)) : 'buton yok'}${f.clinicians ? ' · ' + f.clinicians + ' klinisyen' : ''}${f.button_code ? ' · ' + (f.last_sync ? ago(Date.parse(f.last_sync)) : 'senkron yok') : ''}</span></span><span class="v">›</span></button>`;
     return `<main>
     <header class="row"><div><div class="sub">SkoliData yönetici</div><h1>Yönetim</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
     <section class="card list"><div class="li"><span class="k">Onay bekleyen klinisyenler</span><span class="v">${pending.length}</span></div>
@@ -1724,7 +1754,7 @@ if (SRV.on) {
     <section class="card"><b>Buton ekle / kontrol et</b><p class="small" style="margin:4px 0 8px">Yeni bir butonu sisteme ekle ya da elindeki butonun kimde olduğunu, yazılımını ve pilini gör. Butonun yanında ol.</p>
       <button class="btn primary" data-act="ownerScan">Butona bağlan</button>
       ${o.scan ? `<div class="list" style="margin-top:8px">
-        <div class="li"><span class="k">Buton</span><span class="v">${esc(o.scan.code)}</span></div>
+        <div class="li"><span class="k">Buton</span><span class="v">${esc(btnText(o.scan.code))}</span></div>
         <div class="li"><span class="k">Durum</span><span class="v">${o.scan.family ? 'Ailede: ' + esc(o.scan.family) : 'boşta – bir aile bu butonla hesap oluşturabilir'}</span></div>
         <div class="li"><span class="k">Yazılım</span><span class="v">${esc(o.scan.fw || '–')}</span></div>
         <div class="li"><span class="k">Pil</span><span class="v">${o.scan.mv ? (o.scan.mv / 1000).toFixed(2) + ' V' + (o.scan.mv < 2750 ? ' (az)' : '') : '–'}</span></div>
@@ -1760,7 +1790,7 @@ if (SRV.on) {
     <h1>${esc(famName(f))}</h1>
     <section class="card list">
       <div class="li"><span class="k">Şehir</span><span class="v">${esc(f.city || '–')}</span></div>
-      <div class="li"><span class="k">Butonu</span><span class="v">${f.button_code ? esc(f.button_code) : 'yok' + (f.last_button_code ? ' (son: ' + esc(f.last_button_code) + ')' : '')}</span></div>
+      <div class="li"><span class="k">Butonu</span><span class="v">${f.button_code ? esc(btnText(f.button_code)) : 'yok' + (f.last_button_code ? ' (son: ' + esc(btnText(f.last_button_code)) + ')' : '')}</span></div>
       <div class="li"><span class="k">Son senkron</span><span class="v">${f.button_code && f.last_sync ? ago(Date.parse(f.last_sync)) : '–'}</span></div>
       <div class="li"><span class="k">Hedef</span><span class="v">${f.goal_h || '–'} sa</span></div>
       <div class="li"><span class="k">Klinisyen</span><span class="v">${f.clinicians}</span></div>
@@ -1785,7 +1815,7 @@ if (SRV.on) {
     <p class="sub">${esc(p.who)}</p>
     <section class="card center" style="display:flex;flex-direction:column;align-items:center;gap:6px">
       <b id="tmpPw" style="font-size:30px;letter-spacing:.08em;user-select:all">${esc(p.pw)}</b>
-      <span class="small">${p.code ? 'Giriş: butona (' + esc(p.code) + ') bağlan + bu şifre' : p.email ? 'Giriş: ' + esc(showLogin(p.email)) + ' + bu şifre' : ''}</span></section>
+      <span class="small">${p.code ? 'Giriş: butona (' + esc(btnName(p.code) || 'SkoliData butonu') + ') bağlan + bu şifre' : p.email ? 'Giriş: ' + esc(showLogin(p.email)) + ' + bu şifre' : ''}</span></section>
     <div class="note"><b>Bir kez gösterilir</b>Bu şifreyi kişiye telefonda ya da yüz yüze söyle. İlk girişte kendi yeni şifresini belirlemesi istenecek. Şifre hiçbir yere kaydedilmez.</div>
     <div style="flex:1"></div>
     <button class="btn secondary" data-act="ownerPwCopy">Kopyala</button>
@@ -1816,13 +1846,15 @@ if (SRV.on) {
     const ok = await bleConnect({ infoOnly: true });
     if (!ok || !B.info) return;
     const i = B.info;
-    bleDisconnect(); B.info = null; B.live = null;
     try {
       const family = await SRV.rpc('owner_register_button', { p_code: i.code, p_fw: i.fw || null, p_mv: i.mv || null });
+      await SRV.loadLabels();
+      await nameButtonIfNew();                         // a brand-new button is named "SkoliData <next number>" right away
       SRV.owner.scan = { code: i.code, fw: i.fw, mv: i.mv, flash: i.flash, family, name: i.name };
+      bleDisconnect(); B.info = null; B.live = null;
       await SRV.loadOwner();
-      render(); toast(family ? `${i.code} şu ailede: ${family}` : `${i.code} eklendi (boşta).`);
-    } catch (e) { toast(trErr(e)); }
+      render(); toast(family ? `${btnText(i.code)} şu ailede: ${family}` : `${btnText(i.code)} eklendi (boşta).`);
+    } catch (e) { bleDisconnect(); B.info = null; toast(trErr(e)); }
   };
   // service commands (need the PIN; the button answers "N ok" / "U ok" / "... bad" / "... locked")
   async function ownerService(cmd) {
