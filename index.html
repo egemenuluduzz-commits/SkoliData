@@ -99,7 +99,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.21 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.22 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 function btnName(code) {
@@ -638,7 +638,7 @@ SCREENS.calib = () => {
     <h1>Kalibrasyon</h1>
     <p class="sub">Buton, korsenin takılı ve çıkarılmış halini öğrenir. Toplam ${Math.round(total / 60)} dakika sürer.</p>
     <section class="card list">${steps.map((x, i) => `<div class="li"><span class="k">${i + 1}. ${esc(x.list || x.title)}</span><span class="v">${Math.round(x.seconds / 60)} dk</span></div>`).join('')}</section>
-    <div class="note"><b>Önemli</b>Normal oda sıcaklığında yap (sıcak araba, güneş ya da kalorifer yanında değil). Telefon butonun yakınında kalsın.</div>
+    <div class="note"><b>Önemli</b>Başlamadan önce korseyi en az 10 dakika oda sıcaklığında beklet. Normal oda sıcaklığında yap (sıcak araba, güneş ya da kalorifer yanında değil). Telefon butonun yakınında kalsın.</div>
     <div style="flex:1"></div>${conn}
     <button class="btn primary" data-act="calStart" ${B.connected ? '' : 'disabled'}>Başla</button></main>`;
   if (CAL.phase === 'wait') return `<main>${dots}
@@ -1084,7 +1084,7 @@ SCREENS.calPage = p => {
   <div id="calMsgs"></div>
   <button class="btn primary" id="calSave" data-act="calSave">Kaydet</button>
   <button class="btn text" data-act="calUndo" style="align-self:center">Değişiklikleri geri al</button>
-  <section class="card"><b>Ölçerek yeniden kalibre et</b><p class="help" style="margin:6px 0 10px">${PROTO().map((x, i) => `${i + 1}. ${esc(x.list || x.title)} (${Math.round(x.seconds / 60)} dk)`).join(' · ')}. Buton bağlı olmalı.</p>
+  <section class="card"><b>Ölçerek yeniden kalibre et</b><p class="help" style="margin:6px 0 4px"><b>Kalibrasyona başlamadan önce korseyi en az 10 dakika oda sıcaklığında bekletin.</b></p><p class="help" style="margin:0 0 10px">${PROTO().map((x, i) => `${i + 1}. ${esc(x.list || x.title)} (${Math.round(x.seconds / 60)} dk)`).join(' · ')}. Buton bağlı olmalı.</p>
     <button class="btn secondary" data-act="calMeasure" ${conn ? '' : 'disabled'}>${conn ? 'Ölçümü başlat' : 'Önce butona bağlan (yukarıda)'}</button></section>
   <section class="card list"><div class="li"><span class="k">Geçmiş</span><span></span></div>${hist || '<p class="small">Kayıt yok.</p>'}</section>
 </main>`;
