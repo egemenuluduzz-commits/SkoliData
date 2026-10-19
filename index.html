@@ -99,7 +99,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.20 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.21 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 function btnName(code) {
@@ -223,22 +223,56 @@ async function encodeDay(recs) { const json = packDay(recs); return canGz ? { en
 async function decodeRawRow(row, code) { return unpackDay(row.enc === 'json' ? row.data : new TextDecoder().decode(await gzipBytes(b64dec(row.data), true)), code); }
 // readings for a time window: this device's own, filled in from the server where this device has none
 const RAWCACHE = {};
+// the server's day files for a time window (null when not logged in to the server)
+async function serverRawRows(code, t0, t1, fidIn) {
+  if (!window.SRV_ON || !SRV.user || !SRV.profile) return null;
+  const P = profiles()[code] || {}, fid = SRV.profile.role === 'family' ? SRV.user.id : (fidIn || P.familyId);
+  if (!fid) return null;
+  const ck = [fid, dateKey(t0), dateKey(t1)].join('|'), hit = RAWCACHE[ck];
+  if (hit && Date.now() - hit.at < 300e3) return hit.rows;
+  const rows = SRV.profile.role === 'owner'
+    ? await SRV.rpc('owner_raw_days', { p_family: fid, p_from: dateKey(t0), p_to: dateKey(t1) })
+    : await sv(SRV.sb.from('raw_days').select('*').eq('family_id', fid).gte('day', dateKey(t0)).lte('day', dateKey(t1)));
+  RAWCACHE[ck] = { at: Date.now(), rows };
+  return rows;
+}
+async function mergeServer(code, local, rows, t0, t1) {
+  const have = new Set(local.map(r => Math.round(r.t / 1000))), extra = [];
+  for (const row of rows) if (!row.button_code || row.button_code === code) for (const r of await decodeRawRow(row, code)) if (r.t >= t0 && r.t <= t1 && !have.has(Math.round(r.t / 1000))) extra.push(r);
+  return extra.length ? local.concat(extra).sort((a, b) => a.t - b.t) : local;
+}
 async function getRecsAny(code, t0, t1, fidIn) {
   const local = await getRecs(code, t0, t1);
-  if (!window.SRV_ON || !SRV.user || !SRV.profile) return local;
-  const P = profiles()[code] || {}, fid = SRV.profile.role === 'family' ? SRV.user.id : (fidIn || P.familyId);
-  if (!fid) return local;
   try {
-    const ck = [fid, dateKey(t0), dateKey(t1)].join('|'), hit = RAWCACHE[ck];
-    const rows = hit && Date.now() - hit.at < 300e3 ? hit.rows : (SRV.profile.role === 'owner'
-      ? await SRV.rpc('owner_raw_days', { p_family: fid, p_from: dateKey(t0), p_to: dateKey(t1) })
-      : await sv(SRV.sb.from('raw_days').select('*').eq('family_id', fid).gte('day', dateKey(t0)).lte('day', dateKey(t1))));
-    if (!hit || hit.rows !== rows) RAWCACHE[ck] = { at: Date.now(), rows };
-    const have = new Set(local.map(r => Math.round(r.t / 1000))), extra = [];
-    for (const row of rows) if (!row.button_code || row.button_code === code) for (const r of await decodeRawRow(row, code)) if (r.t >= t0 && r.t <= t1 && !have.has(Math.round(r.t / 1000))) extra.push(r);
-    return extra.length ? local.concat(extra).sort((a, b) => a.t - b.t) : local;
+    const rows = await serverRawRows(code, t0, t1, fidIn);
+    return rows ? await mergeServer(code, local, rows, t0, t1) : local;
   } catch (e) { blog('sunucu ham veri: ' + (e.message || e)); return local; }
 }
+// long windows (1 ay): one averaged reading per minute, built one day at a time so a phone never holds a month of 2-second readings
+const LONG_H = 72;   // windows longer than this many hours use the per-minute readings
+async function getRecsMinute(code, t0, t1, fidIn, binS = 60) {
+  let rows = null;
+  try { rows = await serverRawRows(code, t0, t1, fidIn); } catch (e) { blog('sunucu ham veri: ' + (e.message || e)); }
+  const out = [], binMs = binS * 1000;
+  for (let a = t0; a < t1;) {
+    const nx = new Date(a); nx.setHours(24, 0, 0, 0); const b = Math.min(t1, nx.getTime()), dk = dateKey(a);
+    let day = await getRecs(code, a, b - 1);
+    if (rows) day = await mergeServer(code, day, rows.filter(r => r.day === dk), a, b - 1);
+    let cur = null;
+    const flush = () => { if (cur && cur.ns) out.push({ code, t: cur.k * binMs + binMs / 2, skin: +(cur.s / cur.ns).toFixed(2), rh: cur.nh ? +(cur.h / cur.nh).toFixed(1) : null, chip: cur.nc ? +(cur.c / cur.nc).toFixed(1) : null, n: cur.ns }); };
+    for (const r of day) {
+      const k = Math.floor(r.t / binMs);
+      if (!cur || cur.k !== k) { flush(); cur = { k, s: 0, ns: 0, h: 0, nh: 0, c: 0, nc: 0 }; }
+      if (r.skin !== null && isFinite(r.skin)) { cur.s += r.skin; cur.ns++; }
+      if (r.rh !== null && isFinite(r.rh)) { cur.h += r.rh; cur.nh++; }
+      if (isFinite(r.chip)) { cur.c += r.chip; cur.nc++; }
+    }
+    flush(); a = b;
+  }
+  return out;
+}
+const recsFor = (code, h, fid) => { const t1 = Date.now(), t0 = t1 - h * 3.6e6; return h > LONG_H ? getRecsMinute(code, t0, t1, fid) : getRecsAny(code, t0, t1 + 60e3, fid); };
+const rangeLabel = h => h >= 720 ? '1 ay' : h === 72 ? '3 gün' : h + ' sa';
 
 // ================= Bluetooth (protocol 2) =================
 const B = { device: null, rx: null, connected: false, info: null, chunk: null, syncing: false, live: null, log: [], writeQ: Promise.resolve(), rxBuf: new Uint8Array(0), binLeft: 0, pend: [], rawT: 0 };
@@ -850,29 +884,29 @@ SCREENS.clinPatient = p => {
 };
 SCREENS.clinPatient.after = p => { if (!DAYCACHE[p.code]) computeDays(p.code).then(refresh); };
 SCREENS.raw = p => {
-  const code = p.code, meta = getMeta(code), model = modelFor(code), range = p.range || 6;
+  const code = p.code, meta = getMeta(code), model = modelFor(code), range = p.range || 24;
   return `<main>${p.backTo ? backTo(p.backLabel || btnText(code)) : backBtn('clinPatient', btnText(code))}
   <h1>Ham veri</h1><p class="sub" style="margin-top:-8px">${esc(btnText(code))} · klinisyen ve yönetim ekranı, ailelere gösterilmez</p>
   ${liveSection(code, true)}
-  <section class="card"><div class="row"><b>Sıcaklık</b><span class="seg">${[6, 24, 72].map(h => `<button class="chip${h === range ? ' on' : ''}" data-act="rawRange" data-arg="${h}">${h === 72 ? '3 gün' : h + ' sa'}</button>`).join('')}</span></div>
+  <section class="card"><div class="row"><b>Sıcaklık</b><span class="seg">${[24, 720].map(h => `<button class="chip${h === range ? ' on' : ''}" data-act="rawRange" data-arg="${h}">${rangeLabel(h)}</button>`).join('')}</span></div>
     <div id="rawChart" style="margin-top:8px">${RAWCHART.key === code + '|' + range && RAWCHART.html ? RAWCHART.html : RAWCHART.code === code && RAWCHART.last ? `<div style="opacity:.4">${RAWCHART.last}</div>` : '<p class="small">Yükleniyor…</p>'}</div>
     ${CHART_LEGEND}</section>
   <section class="card list">${SkoliAlgo.facts(model).map(f => `<div class="li"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join('')}
     <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model.isDefault ? 'yok (varsayılan değerler)' : fmtDate(model.createdAt) + (model.kind === 'manual' ? ' · elle ayarlandı' : '')}</span></div>
     <div class="li"><span class="k">Buton yazılımı</span><span class="v">${esc(meta.fw || '–')}</span></div></section>
   <button class="btn primary" data-act="openCal" data-arg="${esc(code)}">Kalibrasyon sayfası</button>
-  <div class="grid2"><button class="btn secondary" data-act="csvRange" data-arg="${esc(code)}">CSV (${range === 72 ? '3 gün' : range + ' sa'})</button><button class="btn secondary" data-act="csvCal" data-arg="${esc(code)}">Kalibrasyon CSV</button></div>
+  <div class="grid2"><button class="btn secondary" data-act="csvRange" data-arg="${esc(code)}">CSV (${rangeLabel(range)}${range > LONG_H ? ', dakikalık' : ''})</button><button class="btn secondary" data-act="csvCal" data-arg="${esc(code)}">Kalibrasyon CSV</button></div>
   <section class="card"><b>Bluetooth günlüğü</b><pre class="log">${esc(APP_VERSION + '\n' + B.log.join('\n'))}</pre></section>
 </main>`;
 };
 const CHART_LEGEND = '<p class="legend">Mavi çizgi: ten tarafı · mavi alan: algoritmaya göre takılı · gri alan: emin değil · kesikli çizgiler: eşikler</p>';
 const RAWCHART = { key: null, html: '', at: 0, code: null, last: '' };
 SCREENS.raw.after = async p => {
-  const range = p.range || 6, key = p.code + '|' + range;
-  if (RAWCHART.key === key && Date.now() - RAWCHART.at < 15000) return;   // redraw at most every 15 s
+  const range = p.range || 24, key = p.code + '|' + range;
+  if (RAWCHART.key === key && Date.now() - RAWCHART.at < (range > LONG_H ? 300e3 : 15000)) return;   // redraw at most every 15 s (1 ay: every 5 min)
   RAWCHART.key = key; RAWCHART.at = Date.now(); RAWCHART.html = '';
   const t1 = Date.now(), t0 = t1 - range * 3.6e6;
-  const recs = await getRecsAny(p.code, t0, t1 + 60e3, p.fid);
+  const recs = await recsFor(p.code, range, p.fid);
   const el = $('#rawChart'); if (!el || screen !== 'raw') return;
   RAWCHART.html = RAWCHART.last = el.innerHTML = rawChartSvg(recs, modelFor(p.code), t0, t1, { h: 170 }); RAWCHART.code = p.code;
 };
@@ -882,7 +916,7 @@ function rawChartSvg(recs, model, t0, t1, o = {}) {
   const W = 340, H = o.h || 150, B0 = H - 16;
   const all = recs.filter(r => r.skin !== null && isFinite(r.skin) && r.t >= t0 - 1 && r.t <= t1 + 1).sort((a, b) => a.t - b.t);
   if (all.length < 2) return '<p class="small">Bu aralıkta ölçüm yok. Butona bağlanıp senkronize et ya da ailenin senkronunu bekle.</p>';
-  const step = Math.max(1, Math.floor(all.length / 600)), pts = all.filter((_, i) => i % step === 0);
+  const step = Math.max(1, Math.floor(all.length / (t1 - t0 > 72 * 3.6e6 ? 1500 : 600))), pts = all.filter((_, i) => i % step === 0);
   const lines = SkoliAlgo.overlays(model).filter(l => isFinite(l.value)), old = o.compare ? SkoliAlgo.overlays(o.compare).filter(l => isFinite(l.value) && l.kind !== 'ref') : [];
   const vals = pts.map(r => r.skin).concat(lines.filter(l => l.kind !== 'ref').map(l => l.value), old.map(l => l.value), o.chip ? pts.filter(r => isFinite(r.chip)).map(r => r.chip) : []);
   const lo = Math.min(...vals) - 0.5, hi = Math.max(...vals) + 0.5;
@@ -895,14 +929,18 @@ function rawChartSvg(recs, model, t0, t1, o = {}) {
     for (const x of st) { const k = x.gapAfter ? null : x.unsure ? 'u' : x.state === 'on' ? 'on' : null, tt = Math.min(t1, Math.max(t0, x.t)); if (k !== cur) { put(cur, a, tt); cur = k; a = tt; } }
     put(cur, a, Math.min(t1, st[st.length - 1].t));
   }
+  // break the line only at real holes: 3x the usual spacing of the plotted points (2-s, 10-s or per-minute data alike)
+  const dts = pts.slice(1).map((r, i) => r.t - pts[i].t).sort((a, b) => a - b), gapMs = Math.max(60e3, 3 * (dts[dts.length >> 1] || 0));
   const poly = (key, color, width) => { let out = '', seg = []; const flush = () => { if (seg.length > 1) out += `<polyline fill="none" stroke="${color}" stroke-width="${width}" points="${seg.join(' ')}"/>`; seg = []; };
-    pts.forEach((r, i) => { if (i && r.t - pts[i - 1].t > Math.max(60e3, step * 4e3)) flush(); if (isFinite(r[key])) seg.push(X(r.t) + ',' + Y(r[key])); }); flush(); return out; };
+    pts.forEach((r, i) => { if (i && r.t - pts[i - 1].t > gapMs) flush(); if (isFinite(r[key])) seg.push(X(r.t) + ',' + Y(r[key])); }); flush(); return out; };
   const hl = (l, color, dash, w) => `<line x1="0" x2="${W}" y1="${Y(l.value)}" y2="${Y(l.value)}" stroke="${color}" stroke-dasharray="${dash}" stroke-width="${w}"/><text x="${W - 2}" y="${(+Y(l.value) - 3).toFixed(1)}" font-size="9" text-anchor="end" fill="${color}">${esc(l.label)} ${l.value.toFixed(1)}</text>`;
   const lineSvg = lines.map(l => l.kind === 'ref' ? hl(l, '#9AA6BF', '1 3', 1) : hl(l, o.compare ? '#1E5EFF' : '#0B1F44', l.kind === 'on' ? '5 3' : '2 3', o.compare ? 1.6 : 1.2)).join('')
     + old.map(l => `<line x1="0" x2="${W}" y1="${Y(l.value)}" y2="${Y(l.value)}" stroke="#8C9AB8" stroke-dasharray="2 2" stroke-width="1"/>`).join('');
+  let days = '';   // faint line at each midnight on long charts
+  if (t1 - t0 > 48 * 3.6e6) for (let d = new Date(t0); ; ) { d.setHours(24, 0, 0, 0); if (d.getTime() >= t1) break; days += `<line x1="${X(d.getTime())}" x2="${X(d.getTime())}" y1="0" y2="${B0}" stroke="#C9D2E3" stroke-width="0.6"/>`; }
   const span = t1 - t0, tl = t => span > 30 * 3.6e6 ? `${fmtDate(t)} ${new Date(t).toTimeString().slice(0, 5)}` : new Date(t).toTimeString().slice(0, 5);
   const axis = `<text x="1" y="${H - 3}" font-size="9" fill="#5B6987">${tl(t0)}</text><text x="${W / 2}" y="${H - 3}" font-size="9" text-anchor="middle" fill="#5B6987">${tl(t0 + span / 2)}</text><text x="${W - 1}" y="${H - 3}" font-size="9" text-anchor="end" fill="#5B6987">${tl(t1)}</text><text x="2" y="10" font-size="9" fill="#5B6987">${hi.toFixed(1)} °C</text><text x="2" y="${B0 - 2}" font-size="9" fill="#5B6987">${lo.toFixed(1)} °C</text>`;
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.label || 'Sıcaklık grafiği')}">${bands}${o.chip ? poly('chip', '#9AA6BF', 1) : ''}${poly('skin', '#1E5EFF', 1.8)}${lineSvg}${axis}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.label || 'Sıcaklık grafiği')}">${days}${bands}${o.chip ? poly('chip', '#9AA6BF', 1) : ''}${poly('skin', '#1E5EFF', 1.8)}${lineSvg}${axis}</svg>`;
 }
 
 // ---------- live temperature (optional; needs the button nearby) ----------
@@ -1038,7 +1076,7 @@ SCREENS.calPage = p => {
   <section class="card list"><div class="li"><span class="k">Şu anki ayar</span><span class="v">${cur.isDefault ? 'varsayılan (kalibrasyon yok)' : `${fmtDate(cur.createdAt)} · ${whoTR(cur.by)} · ${cur.kind === 'manual' ? 'elle' : 'ölçüm'}`}</span></div>
     ${SkoliAlgo.facts(cur).map(f => `<div class="li"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join('')}</section>
   ${liveSection(code, true)}
-  <section class="card"><div class="row"><b>Önizleme</b><span class="seg">${[24, 72].map(h => `<button class="chip${h === CALP.range ? ' on' : ''}" data-act="calRange" data-arg="${h}">${h === 72 ? '3 gün' : '24 sa'}</button>`).join('')}</span></div>
+  <section class="card"><div class="row"><b>Önizleme</b><span class="seg">${[24, 720].map(h => `<button class="chip${h === CALP.range ? ' on' : ''}" data-act="calRange" data-arg="${h}">${rangeLabel(h)}</button>`).join('')}</span></div>
     <div id="calPrev" style="margin-top:8px">${CALP.prevCode === code && CALP.prevHtml ? `<div style="opacity:.4">${CALP.prevHtml}</div>` : '<p class="small">Yükleniyor…</p>'}</div>${CHART_LEGEND}</section>
   <h2 style="margin:6px 0 0">Ayarları değiştir</h2>
   <p class="small">Değiştirdikçe yukarıdaki önizleme yeni ayarla yeniden hesaplanır. Kaydedince ailenin saatleri bu ayarla hesaplanır.</p>
@@ -1079,15 +1117,15 @@ async function calPreview() {
   const msgs = $('#calMsgs');
   if (msgs) msgs.innerHTML = res.errors.map(e => `<div class="warn"><b>Düzelt:</b> ${esc(e)}</div>`).join('') + res.warnings.map(w => `<div class="warn">${esc(w)}</div>`).join('');
   const save = $('#calSave'); if (save) save.disabled = !(res.model && !res.errors.length);
-  const t1 = Date.now(), t0 = t1 - CALP.range * 3.6e6, key = code + '|' + CALP.range + '|' + Math.floor(t1 / 120e3);
-  if (CALP.recsKey !== key) { CALP.recsKey = key; CALP.recs = await getRecsAny(code, t0, t1 + 60e3, CALP.fid); }
+  const long = CALP.range > LONG_H, t1 = Date.now(), t0 = t1 - CALP.range * 3.6e6, key = code + '|' + CALP.range + '|' + Math.floor(t1 / (long ? 600e3 : 120e3));
+  if (CALP.recsKey !== key) { CALP.recsKey = key; CALP.recs = await recsFor(code, CALP.range, CALP.fid); }
   const el = $('#calPrev'); if (!el || screen !== 'calPage') return;
   const recs = CALP.recs || [], show = res.model || cur;
   const a = recs.length > 1 ? SkoliAlgo.classify(recs, cur) : null, b = res.model && recs.length > 1 ? SkoliAlgo.classify(recs, res.model) : null;
   const perDay = r => { const out = {}; if (!r) return out; const st = r.states; for (let i = 0; i < st.length - 1; i++) { if (st[i].gapAfter) continue; const k = dateKey(st[i].t), o = out[k] || (out[k] = { on: 0, un: 0, data: 0 }), dt = st[i + 1].t - st[i].t; o.data += dt; if (st[i].unsure) o.un += dt; else if (st[i].state === 'on') o.on += dt; } return out; };
   const da = perDay(a), db = perDay(b), days = Object.keys(da).sort();
   const table = days.length ? `<table class="cmp"><tr><th>Gün</th><th>Veri</th><th>Şu an</th>${b ? '<th>Yeni ayarla</th>' : ''}</tr>${days.map(k => `<tr><td>${fmtDate(Date.parse(k + 'T12:00:00'))}</td><td>${fmtH1(da[k].data)} sa</td><td>${fmtH1(da[k].on)} sa${da[k].un > 6e4 ? ` <span class="small">(+${fmtH1(da[k].un)} emin değil)</span>` : ''}</td>${b ? `<td><b>${fmtH1((db[k] || {}).on || 0)} sa</b>${(db[k] || {}).un > 6e4 ? ` <span class="small">(+${fmtH1(db[k].un)} emin değil)</span>` : ''}</td>` : ''}</tr>`).join('')}</table>
-    <p class="legend">Saatler sadece bu cihazın gördüğü ölçümlerden hesaplanır (bu aralıktaki ham veri).</p>` : '';
+    <p class="legend">Saatler bu aralıktaki ham veriden hesaplanır${long ? ' (1 ay: dakikalık ortalamalar, ailenin ekranındaki saatlerden biraz farklı olabilir)' : ''}.</p>` : '';
   CALP.prevHtml = el.innerHTML = rawChartSvg(recs, show, t0, t1, { h: 170, compare: res.model ? cur : null, result: res.model ? b : a }) + (res.model ? '<p class="legend">Mavi çizgiler: yeni eşikler · gri kesikli: şimdiki eşikler. Mavi alan yeni ayara göre.</p>' : '') + table; CALP.prevCode = code;
 }
 
@@ -1224,11 +1262,14 @@ Object.assign(ACTIONS, {
     render();
   },
   rawRange: h => go('raw', Object.assign({}, params, { range: +h })),
-  csvRange: async c => {   // the raw readings of the range shown on the Ham veri page (6 h / 24 h / 3 days)
-    const h = params.range || 6, recs = await getRecsAny(c, Date.now() - h * 3.6e6, Date.now() + 60e3, params.fid);
+  csvRange: async c => {   // the readings of the range shown on the Ham veri page (24 h: every reading; 1 month: one average per minute)
+    const h = params.range || 24, long = h > LONG_H;
+    if (long) toast('1 aylık veri hazırlanıyor…');
+    const recs = await recsFor(c, h, params.fid);
     if (!recs.length) { toast('Bu aralıkta ölçüm yok. Butona bağlanıp senkronize et.'); return; }
     const t0 = recs[0].t;
-    download(`skolidata_${csvName(c)}_${h}h.csv`, 'time_s,skin_C,humidity_pct,chip_C,wall_time\n' + recs.map(r => `${((r.t - t0) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip},${new Date(r.t).toISOString()}`).join('\n'));
+    download(`skolidata_${csvName(c)}_${long ? '1ay_dakikalik' : h + 'h'}.csv`, 'time_s,skin_C,humidity_pct,chip_C,wall_time' + (long ? ',n_readings' : '') + '\n'
+      + recs.map(r => `${((r.t - t0) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip ?? ''},${new Date(r.t).toISOString()}${long ? ',' + r.n : ''}`).join('\n'));
   },
   openCal: c => {
     const pr = profiles()[c] || {}, from = { screen, params: Object.assign({}, params) };
