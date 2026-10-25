@@ -1,0 +1,18 @@
+# Calls the server once a day so the free plan never pauses it for inactivity.
+# Uses only the public anon key (already in config.js); the function just updates a timestamp.
+name: keep server awake
+on:
+  schedule:
+    - cron: '17 5 * * *'   # every day 05:17 UTC (08:17 Türkiye)
+  workflow_dispatch: {}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: ping
+        run: |
+          URL=$(grep -o "https://[a-z0-9]*\.supabase\.co" config.js)
+          KEY=$(grep -o "eyJ[A-Za-z0-9._-]*" config.js)
+          curl -fsS --retry 3 -X POST "$URL/rest/v1/rpc/keepalive" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{}'
