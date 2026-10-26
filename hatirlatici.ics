@@ -4,11 +4,11 @@ PRODID:-//SkoliData//Hatirlatici//TR
 CALSCALE:GREGORIAN
 METHOD:PUBLISH
 BEGIN:VEVENT
-UID:skolidata-hatirlatici-3gun@skolidata.com
+UID:skolidata-hatirlatici-2hafta@skolidata.com
 DTSTAMP:20261026T060000Z
 DTSTART:20261027T190000
 DTEND:20261027T191000
-RRULE:FREQ=DAILY;INTERVAL=3
+RRULE:FREQ=DAILY;INTERVAL=14
 SUMMARY:SkoliData'yı aç
 DESCRIPTION:Uygulamayı butonun yanında aç\; korse saatlerin kaydedilsin. https://skolidata.com
 URL:https://skolidata.com
