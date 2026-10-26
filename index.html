@@ -70,10 +70,13 @@ input.in:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 4px rgba(3
 .list{display:flex;flex-direction:column}
 a.li{text-decoration:none}
 main a:not(.li){color:#1E5EFF;text-decoration:none;font-weight:600}
+main a.btn.primary{color:#fff;font-weight:700}main a.btn.text{display:flex;margin:4px auto 0}
 .li{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:10px 0;border-bottom:1px solid #EEF2F9;background:none;border-left:none;border-right:none;border-top:none;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
 .li:last-child{border-bottom:none}
 .li .k{font-weight:700}.li .v{color:var(--slate);font-weight:600;font-size:15px;text-align:right}
 .chip{display:inline-flex;align-items:center;gap:6px;background:var(--pale);color:var(--deep);border-radius:12px;padding:4px 10px;font-size:13px;font-weight:700}
+.chip.sync-warn{background:#FFF3DC;color:#8A5300}.chip.sync-late{background:#FDE5E3;color:#B42318}.chip.sync-none{background:#EEF1F6;color:#5B6987}
+.card.alert{border:2px solid #F3B4AD}
 .check{display:flex;gap:12px;align-items:flex-start;font-weight:600;font-size:15px;line-height:1.4;cursor:pointer}
 .check input{width:24px;height:24px;accent-color:var(--blue);flex:none;margin:0}
 .gauge{display:flex;gap:4px}.gauge i{flex:1;height:10px;border-radius:5px;background:var(--line)}.gauge i.on{background:var(--blue)}
@@ -99,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.22 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.23 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 function btnName(code) {
@@ -146,6 +149,16 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function waitFor(pred, ms) { const end = Date.now() + ms; while (Date.now() < end) { if (pred()) return true; await sleep(50); } return !!pred(); }
 const startOfDay = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const addDays = (t, n) => { const d = new Date(t); d.setDate(d.getDate() + n); return d.getTime(); };
+// ---------- how long the button keeps readings, and when a family should open the app ----------
+// fw0.8: 2 MB memory, 8 bytes per reading, one reading every 2 s -> about 6 days, then the oldest readings are written over.
+// Change this together with the firmware (e.g. one reading every 10 s -> about 30 days) and update hatirlatici.ics.
+const BUTTON_MEMORY_DAYS = 6;
+const REMIND_EVERY_DAYS = Math.max(2, Math.floor(BUTTON_MEMORY_DAYS / 2));            // reminder: half the memory
+const syncAge = t => {   // null = never synced; level: ok / warn (half the memory) / late (80 % of it: data about to be lost)
+  if (!t) return null; const d = (Date.now() - t) / 864e5;
+  return { days: Math.floor(d), level: d >= BUTTON_MEMORY_DAYS * 0.8 ? 'late' : d >= REMIND_EVERY_DAYS ? 'warn' : 'ok' };
+};
+const syncChip = t => { const a = syncAge(t); return !a ? '<span class="chip sync-none">hiç okunmadı</span>' : a.level === 'ok' ? '' : `<span class="chip sync-${a.level}">${a.days} gündür okunmadı</span>`; };
 const dateKey = t => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 const fmtHM = ms => { const h = Math.floor(ms / 3.6e6), m = Math.floor((ms % 3.6e6) / 6e4); return `${h} sa ${m} dk`; };
 const fmtH1 = ms => (ms / 3.6e6).toFixed(1).replace('.', ',');
@@ -705,6 +718,20 @@ function nowState(code) {
   if (lastSeg && Date.now() - lastSeg[1] < 180e3) return 'on';
   return r.skin >= model.thrOn ? 'on' : 'off';
 }
+// add-to-calendar: iPhone opens the .ics file (Calendar asks "Add"); Android/Google opens Google Calendar with the event filled in
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function googleRemindUrl() {
+  const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(19, 0, 0, 0);
+  const f = x => x.getFullYear() + String(x.getMonth() + 1).padStart(2, '0') + String(x.getDate()).padStart(2, '0') + 'T' + String(x.getHours()).padStart(2, '0') + String(x.getMinutes()).padStart(2, '0') + '00';
+  const e = new Date(d.getTime() + 10 * 6e4);
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent("SkoliData'yı aç")
+    + '&details=' + encodeURIComponent('Uygulamayı butonun yanında aç; korse saatlerin kaydedilsin. https://skolidata.com')
+    + '&dates=' + f(d) + '/' + f(e) + '&ctz=Europe%2FIstanbul&recur=' + encodeURIComponent('RRULE:FREQ=DAILY;INTERVAL=' + REMIND_EVERY_DAYS);
+}
+const remindButtons = () => isIOS()
+  ? `<a class="btn primary" href="hatirlatici.ics" data-remind="1">Takvime ekle</a><a class="btn text" href="${googleRemindUrl()}" target="_blank" rel="noopener" data-remind="1" style="min-height:36px">Google Takvim kullanıyorum</a>`
+  : `<a class="btn primary" href="${googleRemindUrl()}" target="_blank" rel="noopener" data-remind="1">Google Takvim'e ekle</a><a class="btn text" href="hatirlatici.ics" data-remind="1" style="min-height:36px">Başka bir takvim (.ics dosyası)</a>`;
+document.addEventListener('click', e => { const a = e.target.closest('[data-remind]'); if (a && session && session.code) { lsSet('sk.remind.' + session.code, Date.now()); setTimeout(() => { if (screen === 'famHome') render(); }, 800); } });
 SCREENS.famHome = () => {
   const code = session.code, p = profiles()[code] || {}, goalMs = (p.goal || 16) * 3.6e6;
   const days = daysList(code, 7), today = days[6], meta = getMeta(code), sm = summary(code), model = getModel(code);
@@ -718,6 +745,7 @@ SCREENS.famHome = () => {
   const goalNote = p.goalNote && Date.now() - p.goalNote.at < 3 * 864e5 ? `<div class="note"><b>Yeni günlük hedefin: ${p.goalNote.to} saat</b>Klinisyenin günlük hedefini ${p.goalNote.from} saatten ${p.goalNote.to} saate değiştirdi. Bu not 3 gün içinde kaybolacak.</div>` : '';
   const calNote = !model ? `<div class="note"><b>Kalibrasyon önerilir</b>10 dakikalık kalibrasyonla saatler senin korsene göre daha doğru hesaplanır. <button class="btn text" style="min-height:36px;padding:0" data-act="calOpen" data-arg="family">Şimdi yap</button></div>` : '';
   const unevenNote = sm.uneven ? `<div class="note">Bu hafta günlerin biraz inişli çıkışlı. Her gün benzer sürede takmayı dene.</div>` : '';
+  const remindNote = lsGet('sk.remind.' + code, 0) ? '' : `<section class="card"><b>Hatırlatıcı kur</b><p class="help" style="margin:6px 0 10px">Butonun kayıtları yaklaşık ${BUTTON_MEMORY_DAYS} gün saklar. Saatlerinin kaybolmaması için uygulamayı en az ${REMIND_EVERY_DAYS} günde bir butonun yanında aç. Takvimine bir hatırlatıcı ekleyelim mi?</p>${remindButtons()}<button class="btn text" data-act="remindLater" style="display:flex;margin:0 auto;min-height:36px">Şimdi değil</button></section>`;
   const bat = battery(code), batNote = bat.low ? `<div class="note"><b>Pil</b>${esc(bat.txt)}<br>${CONTACT_HTML}</div>` : '';
   const d = new Date();
   return `<main>
@@ -731,7 +759,7 @@ SCREENS.famHome = () => {
   <div class="pill"><span class="dot ${status[0]}"></span><span>${status[1]}</span></div>
   ${!B.connected ? '<button class="btn primary" data-act="connect">Butona bağlan</button>' : ''}
   <section class="card"><div class="row"><b>Bu hafta</b><span class="small">${wk.filter(w => w.d && w.d.ms >= goalMs).length} gün hedefte</span></div><div class="week">${dots}</div></section>
-  ${calNote}${unevenNote}
+  ${calNote}${unevenNote}${remindNote}
   <div class="grid2"><button class="btn secondary" data-act="go" data-arg="famWeek">Haftam</button><button class="btn secondary" data-act="calOpen" data-arg="family">Kalibrasyon</button></div>
   <p class="upd">Son güncelleme: ${ago(meta.lastSync && B.live ? Math.max(meta.lastSync, B.live.t) : meta.lastSync)}</p>
 </main>`;
@@ -788,6 +816,7 @@ SCREENS.famSettings = () => {
     <div class="li" style="flex-direction:column;align-items:stretch"><div class="row"><span class="k">Pil</span><span class="v">${esc(bat.txt)}</span></div><div class="gauge" aria-hidden="true">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= bat.seg ? 'on' : ''}"></i>`).join('')}</div></div>
     <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model ? fmtDate(model.createdAt) : 'yapılmadı'}</span></div>
   </section>
+  <section class="card"><b>Hatırlatıcı</b><p class="help" style="margin:6px 0 10px">Takvimine ${REMIND_EVERY_DAYS} günde bir "SkoliData'yı aç" hatırlatıcısı ekler. Saatini takviminden değiştirebilirsin.</p>${remindButtons()}</section>
   <section class="card list">
     <button class="li" data-act="showConsent"><span class="k">Gizlilik ve onay</span><span class="v">›</span></button>
     <a class="li" href="tel:${CONTACT.tel}"><span class="k">Telefon</span><span class="v">${CONTACT.phone}</span></a>
@@ -849,10 +878,13 @@ function miniBars(code, goalMs) {
 let clinCodes = knownCodes;
 SCREENS.clinList = () => {
   const codes = clinCodes(), P = profiles();
-  const rows = codes.map(c => { const s = summary(c), g = (P[c] && P[c].goal) || 16, nm = P[c] && P[c].displayName; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(nm || btnText(c))}</span><br><span class="small">${nm ? esc(P[c].noButton ? 'buton yok' : btnText(c)) + ' · ' : ''}${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : s.todayData ? 'bugün ' + fmtH1(s.todayMs) + ' sa' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven ? '<span class="chip">Düzensiz</span>' : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
+  const lastOf = c => (P[c] && P[c].noButton) ? undefined : getMeta(c).lastSync;
+  const late = codes.filter(c => { const a = syncAge(lastOf(c)); return lastOf(c) !== undefined && a && a.level !== 'ok'; }).sort((a, b) => (lastOf(a) || 0) - (lastOf(b) || 0));
+  const rows = codes.map(c => { const s = summary(c), g = (P[c] && P[c].goal) || 16, nm = P[c] && P[c].displayName; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(nm || btnText(c))}</span><br><span class="small">${nm ? esc(P[c].noButton ? 'buton yok' : btnText(c)) + ' · ' : ''}${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : s.todayData ? 'bugün ' + fmtH1(s.todayMs) + ' sa' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven ? '<span class="chip">Düzensiz</span>' : ''}${lastOf(c) !== undefined ? syncChip(lastOf(c)) : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
+  const lateCard = late.length ? `<section class="card alert"><b>${late.length} ailenin butonu okunmayı bekliyor</b><p class="help" style="margin:6px 0 0">Buton kayıtları yaklaşık ${BUTTON_MEMORY_DAYS} gün saklar. ${REMIND_EVERY_DAYS} gün ve üzeri okunmayanlar aşağıda işaretli; aileyi arayıp uygulamayı açmasını hatırlatın.</p></section>` : '';
   return `<main>
   <header class="row"><div><div class="sub">${esc((CLINICIANS.find(x => x.u === session.u) || {}).name || '')} <span class="chip">Doğrulanmış</span></div><h1>Hastalarım</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
-  <section class="card list">${rows || '<p class="small">Bu telefonda henüz kayıtlı buton yok. Klinikte butonu bağlayarak başla.</p>'}</section>
+  ${lateCard}<section class="card list">${rows || '<p class="small">Bu telefonda henüz kayıtlı buton yok. Klinikte butonu bağlayarak başla.</p>'}</section>
   ${B.syncing ? `<div class="pill"><span class="dot wait"></span>${syncText()}</div>` : ''}
   <button class="btn secondary" data-act="clinConnect">Buton bağla</button>
   <p class="small">Bu sürümde yalnızca bu telefona senkronize edilen butonlar görünür. Sunucu bağlantısı sonraki adım.</p>
@@ -1131,6 +1163,7 @@ async function calPreview() {
 
 // ================= actions =================
 const ACTIONS = {
+  remindLater: () => { lsSet('sk.remind.' + session.code, Date.now()); render(); },
   go: s => go(s, s === 'clinPatient' || s === 'raw' ? params : {}),
   connect: async () => {
     if (session && session.role === 'family') return bleConnect({ expect: session.code });
@@ -1881,11 +1914,14 @@ if (SRV.on) {
   const famName = f => f.display_name || `İsimsiz (${f.city || 'şehir yok'})`;
   SCREENS.owner = () => {
     const o = SRV.owner, pending = o.clinicians.filter(c => !c.approved), approved = o.clinicians.filter(c => c.approved);
-    const stale = h => !h.last_sync || Date.now() - Date.parse(h.last_sync) > 3 * 864e5;
-    const healthRow = h => `<div class="li"><span><span class="k">${esc(btnText(h.code))}</span><br><span class="small">${h.assigned ? esc(h.family_name || 'ailede') : 'boşta'} · ${h.fw ? esc(h.fw) : '–'} · ${h.flash === false ? 'flash yok · ' : ''}${h.last_sync ? ago(Date.parse(h.last_sync)) : 'hiç senkron yok'}</span></span><span class="chip">${!h.assigned ? '⚪ boşta' : stale(h) ? '⚪ 3+ gün yok' : h.mv && h.mv < 2750 ? '🔵 pil az' : '🟢 çalışıyor'}</span></div>`;
-    const famRow = f => `<button class="li" data-act="ownerOpenFam" data-arg="${esc(f.id)}"><span><span class="k">${esc(famName(f))}</span><br><span class="small">${esc(f.city || '')} · ${f.button_code ? esc(btnText(f.button_code)) : 'buton yok'}${f.clinicians ? ' · ' + f.clinicians + ' klinisyen' : ''}${f.button_code ? ' · ' + (f.last_sync ? ago(Date.parse(f.last_sync)) : 'senkron yok') : ''}</span></span><span class="v">›</span></button>`;
+    const stale = h => !h.last_sync || Date.now() - Date.parse(h.last_sync) > REMIND_EVERY_DAYS * 864e5;
+    const healthRow = h => `<div class="li"><span><span class="k">${esc(btnText(h.code))}</span><br><span class="small">${h.assigned ? esc(h.family_name || 'ailede') : 'boşta'} · ${h.fw ? esc(h.fw) : '–'} · ${h.flash === false ? 'flash yok · ' : ''}${h.last_sync ? ago(Date.parse(h.last_sync)) : 'hiç senkron yok'}</span></span><span class="chip">${!h.assigned ? '⚪ boşta' : stale(h) ? `⚪ ${REMIND_EVERY_DAYS}+ gün yok` : h.mv && h.mv < 2750 ? '🔵 pil az' : '🟢 çalışıyor'}</span></div>`;
+    const famRow = f => `<button class="li" data-act="ownerOpenFam" data-arg="${esc(f.id)}"><span><span class="k">${esc(famName(f))}</span><br><span class="small">${esc(f.city || '')} · ${f.button_code ? esc(btnText(f.button_code)) : 'buton yok'}${f.clinicians ? ' · ' + f.clinicians + ' klinisyen' : ''}${f.button_code ? ' · ' + (f.last_sync ? ago(Date.parse(f.last_sync)) : 'senkron yok') : ''}</span>${f.button_code ? ' ' + syncChip(f.last_sync ? Date.parse(f.last_sync) : 0) : ''}</span><span class="v">›</span></button>`;
+    const waiting = o.families.filter(f => { if (!f.button_code || !f.last_sync) return false; const a = syncAge(Date.parse(f.last_sync)); return a && a.level !== 'ok'; }).sort((a, b) => Date.parse(a.last_sync) - Date.parse(b.last_sync));
+    const waitCard = waiting.length ? `<section class="card list alert"><div class="li"><span class="k">Okunmayı bekleyen butonlar</span><span class="v">${waiting.length}</span></div>${waiting.map(famRow).join('')}<p class="small">Buton kayıtları yaklaşık ${BUTTON_MEMORY_DAYS} gün saklar. En eski kayıtların üzerine yazılmadan önce aileye (ya da klinisyenine) ulaşıp uygulamayı açmasını hatırlatın.</p></section>` : '';
     return `<main>
     <header class="row"><div><div class="sub">SkoliData yönetici</div><h1>Yönetim</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
+    ${waitCard}
     <section class="card list"><div class="li"><span class="k">Onay bekleyen klinisyenler</span><span class="v">${pending.length}</span></div>
       ${pending.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${c.kind === 'orthotist' ? 'ortotist' : 'doktor'} · ${esc(showLogin(c.email))} · ${esc(c.city || '')}</span></span><span style="display:flex;gap:4px"><button class="btn text" data-act="ownerApprove" data-arg="${c.id}">Onayla</button><button class="btn text" data-act="ownerReject" data-arg="${c.id}">Reddet</button></span></div>`).join('') || '<p class="small">Bekleyen yok.</p>'}
     </section>
