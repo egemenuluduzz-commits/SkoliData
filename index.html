@@ -102,9 +102,11 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.26 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.27 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
+// clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
+const showInterp = () => isOwnerView();
 function btnName(code) {
   const l = window.SRV_ON && typeof SRV !== 'undefined' && SRV.labels && SRV.labels[code]; if (l) return l;
   const n = getMeta(code).bleName; return n && n !== code ? n : null;
@@ -884,7 +886,7 @@ SCREENS.clinList = () => {
   const lastOf = c => (P[c] && P[c].noButton) ? undefined : getMeta(c).lastSync;
   const fwOf = c => getMeta(c).fw;
   const late = codes.filter(c => { const a = syncAge(lastOf(c), fwOf(c)); return lastOf(c) !== undefined && a && a.level !== 'ok'; }).sort((a, b) => (lastOf(a) || 0) - (lastOf(b) || 0));
-  const rows = codes.map(c => { const s = summary(c), g = (P[c] && P[c].goal) || 16, nm = P[c] && P[c].displayName; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(nm || btnText(c))}</span><br><span class="small">${nm ? esc(P[c].noButton ? 'buton yok' : btnText(c)) + ' · ' : ''}${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : s.todayData ? 'bugün ' + fmtH1(s.todayMs) + ' sa' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven ? '<span class="chip">Düzensiz</span>' : ''}${lastOf(c) !== undefined ? syncChip(lastOf(c), fwOf(c)) : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
+  const rows = codes.map(c => { const s = summary(c), g = (P[c] && P[c].goal) || 16, nm = P[c] && P[c].displayName; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(nm || btnText(c))}</span><br><span class="small">${nm ? esc(P[c].noButton ? 'buton yok' : btnText(c)) + ' · ' : ''}${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : s.todayData ? 'bugün ' + fmtH1(s.todayMs) + ' sa' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven && showInterp() ? '<span class="chip">Düzensiz</span>' : ''}${lastOf(c) !== undefined ? syncChip(lastOf(c), fwOf(c)) : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
   const lateCard = late.length ? `<section class="card alert"><b>${late.length} ailenin butonu okunmayı bekliyor</b><p class="help" style="margin:6px 0 0">${MEMORY_NOTE} Aileyi arayıp uygulamayı açmasını hatırlatın.</p></section>` : '';
   return `<main>
   <header class="row"><div><div class="sub">${esc((CLINICIANS.find(x => x.u === session.u) || {}).name || '')} <span class="chip">Doğrulanmış</span></div><h1>Hastalarım</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
@@ -903,7 +905,7 @@ SCREENS.clinPatient = p => {
   return `<main>${backBtn('clinList', 'Hastalarım')}
   <h1>${esc(btnText(code))}</h1>
   <div class="grid2"><div class="card stat"><span>${s.daysWithData ? '14 gün ortalama' : 'Bugün'}</span><b>${fmtH1(s.daysWithData ? s.avg : s.todayMs)} sa</b></div><div class="card stat"><span>Hedef</span><b>${g} sa</b></div></div>
-  ${s.uneven ? '<div class="note"><b>Düzensiz</b>Son 14 günde günlük süreler arasında büyük fark var.</div>' : ''}
+  ${s.uneven && showInterp() ? '<div class="note"><b>Düzensiz</b>Son 14 günde günlük süreler arasında büyük fark var.</div>' : ''}
   <section class="card"><b>Son 14 gün</b>${barsSvg(days, goalMs, 1)}</section>
   <section class="card"><b>Haftalık harita</b><p class="small" style="margin:4px 0 8px">Son 7 gün, takılı saatler mavi.</p>${weekMapSvg(days.slice(7))}</section>
   <section class="card"><div class="row"><b>Hedefi değiştir</b></div><div class="stepper" style="margin-top:10px"><button data-act="clinGoal" data-arg="-1" aria-label="Azalt">–</button><b>${g} saat</b><button data-act="clinGoal" data-arg="1" aria-label="Artır">+</button></div><p class="small" style="margin-top:8px">Değişiklik aileye bildirilir ve 3 gün boyunca ana ekranda görünür.</p></section>
@@ -1080,8 +1082,8 @@ function liveInner(code) {
     <div class="stat"><span>Ten tarafı</span><b>${r.skin !== null ? r.skin.toFixed(2) + ' °C' : 'ERR'}</b></div>
     <div class="stat"><span>Nem</span><b>${r.rh !== null ? Math.round(r.rh) + ' %' : '–'}</b></div>
     <div class="stat"><span>Kapak (çip)</span><b>${isFinite(r.chip) ? r.chip.toFixed(1) + ' °C' : '–'}</b></div>
-    <div class="stat"><span>Algoritma şu an</span><b>${st}</b></div></div>
-    ${(ls => ls ? `<div class="note neutral" style="margin-top:8px"><b style="margin:0">${esc(ls.text)}</b><span class="small">Ailenin gördüğü mesaj${ls.when ? ' · ' + ago(ls.when) : ''}</span></div>` : '')(liveStatus(code))}
+    ${showInterp() ? `<div class="stat"><span>Algoritma şu an</span><b>${st}</b></div>` : ''}</div>
+    ${(ls => ls && showInterp() ? `<div class="note neutral" style="margin-top:8px"><b style="margin:0">${esc(ls.text)}</b><span class="small">Ailenin gördüğü mesaj${ls.when ? ' · ' + ago(ls.when) : ''}</span></div>` : '')(liveStatus(code))}
     ${buf.length >= 2 ? `<div style="margin-top:8px">${rawChartSvg(buf, model, Date.now() - 10 * 60e3, Date.now(), { h: 110, label: 'Son 10 dakika' })}</div><p class="legend">Son 10 dakika, her 2 saniyede bir.</p>` : ''}`;
 }
 function liveSection(code, always) {
