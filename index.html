@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.27 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.28 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -484,20 +484,25 @@ async function computeDays(code, nDays = 14, force) {
   for (let d = nDays - 1; d >= 0; d--) {
     const a = addDays(today0, -d), b = addDays(today0, -d + 1), key = dateKey(a), isToday = d === 0;
     const c = cache[key];
-    if (!isToday && c && c.modelAt === model.createdAt) { out[key] = c; continue; }
+    if (!isToday && c && c.modelAt === model.createdAt && c.v === 2) { out[key] = c; continue; }
     const recs = await getRecs(code, a - 30 * 60e3, Math.min(b, Date.now() + 60e3));
     const prev = DAYCACHE[code] && DAYCACHE[code][key];
     if (recs.length <= 1 && prev && prev.fromServer) { out[key] = prev; continue; }
-    const day = { key, start: a, ms: 0, unsureMs: 0, dataMs: 0, segs: [], n: 0, modelAt: model.createdAt };
+    const day = { key, start: a, ms: 0, unsureMs: 0, dataMs: 0, segs: [], n: 0, modelAt: model.createdAt, v: 2 };
     if (recs.length > 1) {
       const r = SkoliAlgo.classify(recs, model), st = r.states;
+      // the week map's blue spans = exactly the minutes counted in the hours (worn and not "unsure")
+      let runA = null, runB = 0;
+      const close = () => { if (runA !== null) { day.segs.push([runA, runB]); runA = null; } };
       for (let i = 0; i < st.length - 1; i++) {
         const x = Math.max(st[i].t, a), y = Math.min(st[i + 1].t, b);
-        if (y <= x || st[i].gapAfter) continue;
+        if (y <= x || st[i].gapAfter) { close(); continue; }
         day.dataMs += y - x;
-        if (st[i].unsure) day.unsureMs += y - x; else if (st[i].state === 'on') day.ms += y - x;
+        if (st[i].unsure) { day.unsureMs += y - x; close(); }
+        else if (st[i].state === 'on') { day.ms += y - x; if (runA === null || x - runB > 1000) { close(); runA = x; } runB = y; }
+        else close();
       }
-      day.segs = r.segments.filter(s => s.state === 'on' && s.to > a && s.from < b).map(s => [Math.max(s.from, a), Math.min(s.to, b)]);
+      close();
       day.n = recs.filter(x => x.t >= a).length;
     }
     out[key] = day;
