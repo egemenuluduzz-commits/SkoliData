@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.29 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.30 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -162,12 +162,15 @@ const syncAge = (t, fw) => {   // null = never synced; level: ok / warn (half th
   if (!t) return null; const d = (Date.now() - t) / 864e5;
   return { days: Math.floor(d), level: d >= memDaysFor(fw) * 0.8 ? 'late' : d >= syncWarnDays(fw) ? 'warn' : 'ok' };
 };
-const syncChip = (t, fw) => { const a = syncAge(t, fw); return !a ? '<span class="chip sync-none">hiç okunmadı</span>' : a.level === 'ok' ? '' : `<span class="chip sync-${a.level}">${a.days} gündür okunmadı</span>`; };
+const syncChip = (t, fw) => { const a = syncAge(t, fw); return !a ? '<span class="chip sync-none">hiç okunmadı</span>' : a.level === 'ok' ? '' : `<span class="chip sync-${a.level}">son okuma ${whenShort(t)}</span>`; };
 const MEMORY_NOTE = 'Buton kayıtları yazılımına göre yaklaşık 30 gün (fw0.9) ya da 6 gün (eski yazılım) saklar. Bu sürenin yarısı geçince sarı, %80\'i geçince kırmızı işaretlenir.';
 const dateKey = t => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 const fmtHM = ms => { const h = Math.floor(ms / 3.6e6), m = Math.floor((ms % 3.6e6) / 6e4); return `${h} sa ${m} dk`; };
 const fmtH1 = ms => (ms / 3.6e6).toFixed(1).replace('.', ',');
 const fmtDate = t => { const d = new Date(t); return `${d.getDate()} ${MONTHS_TR[d.getMonth()]}`; };
+// sync times are shown as a date + time, never as "x hours ago"
+function when(t) { if (!t) return 'henüz yok'; return new Date(t).toLocaleString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+const whenShort = t => new Date(t).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
 function ago(t) { if (!t) return 'henüz yok'; const s = (Date.now() - t) / 1000; if (s < 60) return 'az önce'; if (s < 3600) return Math.floor(s / 60) + ' dk önce'; if (s < 86400) return Math.floor(s / 3600) + ' sa önce'; return Math.floor(s / 86400) + ' gün önce'; }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2600); }
 async function sha256hex(s) {
@@ -771,7 +774,7 @@ SCREENS.famHome = () => {
   <section class="card"><div class="row"><b>Bu hafta</b><span class="small">${wk.filter(w => w.d && w.d.ms >= goalMs).length} gün hedefte</span></div><div class="week">${dots}</div></section>
   ${calNote}${unevenNote}${remindNote}
   <div class="grid2"><button class="btn secondary" data-act="go" data-arg="famWeek">Haftam</button><button class="btn secondary" data-act="calOpen" data-arg="family">Kalibrasyon</button></div>
-  <p class="upd">Son güncelleme: ${ago(meta.lastSync && B.live ? Math.max(meta.lastSync, B.live.t) : meta.lastSync)}</p>
+  <p class="upd">Son güncelleme: ${when(meta.lastSync && B.live ? Math.max(meta.lastSync, B.live.t) : meta.lastSync)}</p>
 </main>`;
 };
 SCREENS.famHome.after = () => { const code = session && session.code; if (code && !DAYCACHE[code]) computeDays(code).then(refresh); if (code && !window.SRV_ON) loadOldButtons(code); };
@@ -916,7 +919,7 @@ SCREENS.clinPatient = p => {
   <section class="card"><div class="row"><b>Hedefi değiştir</b></div><div class="stepper" style="margin-top:10px"><button data-act="clinGoal" data-arg="-1" aria-label="Azalt">–</button><b>${g} saat</b><button data-act="clinGoal" data-arg="1" aria-label="Artır">+</button></div><p class="small" style="margin-top:8px">Bu hedef yalnızca senin sayfanda kullanılır; aileye gitmez.</p></section>
   <section class="card list">
     <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model ? fmtDate(model.createdAt) + ' · ' + (model.by === 'clinician' ? 'klinisyen' : 'aile') : 'yapılmadı'}</span></div>
-    <div class="li"><span class="k">Son senkron</span><span class="v">${ago(meta.lastSync)}</span></div>
+    <div class="li"><span class="k">Son senkron</span><span class="v">${when(meta.lastSync)}</span></div>
     <div class="li"><span class="k">Pil</span><span class="v">${esc(battery(code).txt)}</span></div>
   </section>
   ${liveSection(code)}
@@ -1926,8 +1929,8 @@ if (SRV.on) {
     const o = SRV.owner, pending = o.clinicians.filter(c => !c.approved), approved = o.clinicians.filter(c => c.approved);
     const fwOf = code => ((o.health || []).find(h => h.code === code) || {}).fw;
     const stale = h => !h.last_sync || Date.now() - Date.parse(h.last_sync) > syncWarnDays(h.fw) * 864e5;
-    const healthRow = h => `<div class="li"><span><span class="k">${esc(btnText(h.code))}</span><br><span class="small">${h.assigned ? esc(h.family_name || 'ailede') : 'boşta'} · ${h.fw ? esc(h.fw) : '–'} · ${h.flash === false ? 'flash yok · ' : ''}${h.last_sync ? ago(Date.parse(h.last_sync)) : 'hiç senkron yok'}</span></span><span class="chip">${!h.assigned ? '⚪ boşta' : stale(h) ? `⚪ ${syncWarnDays(h.fw)}+ gün yok` : h.mv && h.mv < 2750 ? '🔵 pil az' : '🟢 çalışıyor'}</span></div>`;
-    const famRow = f => `<button class="li" data-act="ownerOpenFam" data-arg="${esc(f.id)}"><span><span class="k">${esc(famName(f))}</span><br><span class="small">${esc(f.city || '')} · ${f.button_code ? esc(btnText(f.button_code)) : 'buton yok'}${f.clinicians ? ' · ' + f.clinicians + ' klinisyen' : ''}${f.button_code ? ' · ' + (f.last_sync ? ago(Date.parse(f.last_sync)) : 'senkron yok') : ''}</span>${f.button_code ? ' ' + syncChip(f.last_sync ? Date.parse(f.last_sync) : 0, fwOf(f.button_code)) : ''}</span><span class="v">›</span></button>`;
+    const healthRow = h => `<div class="li"><span><span class="k">${esc(btnText(h.code))}</span><br><span class="small">${h.assigned ? esc(h.family_name || 'ailede') : 'boşta'} · ${h.fw ? esc(h.fw) : '–'} · ${h.flash === false ? 'flash yok · ' : ''}${h.last_sync ? when(Date.parse(h.last_sync)) : 'hiç senkron yok'}</span></span><span class="chip">${!h.assigned ? '⚪ boşta' : stale(h) ? `⚪ ${syncWarnDays(h.fw)}+ gün yok` : h.mv && h.mv < 2750 ? '🔵 pil az' : '🟢 çalışıyor'}</span></div>`;
+    const famRow = f => `<button class="li" data-act="ownerOpenFam" data-arg="${esc(f.id)}"><span><span class="k">${esc(famName(f))}</span><br><span class="small">${esc(f.city || '')} · ${f.button_code ? esc(btnText(f.button_code)) : 'buton yok'}${f.clinicians ? ' · ' + f.clinicians + ' klinisyen' : ''}${f.button_code ? ' · ' + (f.last_sync ? when(Date.parse(f.last_sync)) : 'senkron yok') : ''}</span>${f.button_code ? ' ' + syncChip(f.last_sync ? Date.parse(f.last_sync) : 0, fwOf(f.button_code)) : ''}</span><span class="v">›</span></button>`;
     const waiting = o.families.filter(f => { if (!f.button_code || !f.last_sync) return false; const a = syncAge(Date.parse(f.last_sync), fwOf(f.button_code)); return a && a.level !== 'ok'; }).sort((a, b) => Date.parse(a.last_sync) - Date.parse(b.last_sync));
     const waitCard = waiting.length ? `<section class="card list alert"><div class="li"><span class="k">Okunmayı bekleyen butonlar</span><span class="v">${waiting.length}</span></div>${waiting.map(famRow).join('')}<p class="small">${MEMORY_NOTE} En eski kayıtların üzerine yazılmadan önce aileye (ya da klinisyenine) ulaşıp uygulamayı açmasını hatırlatın.</p></section>` : '';
     return `<main>
@@ -1988,7 +1991,7 @@ if (SRV.on) {
     <section class="card list">
       <div class="li"><span class="k">Şehir</span><span class="v">${esc(f.city || '–')}</span></div>
       <div class="li"><span class="k">Butonu</span><span class="v">${f.button_code ? esc(btnText(f.button_code)) : 'yok' + (f.last_button_code ? ' (son: ' + esc(btnText(f.last_button_code)) + ')' : '')}</span></div>
-      <div class="li"><span class="k">Son senkron</span><span class="v">${f.button_code && f.last_sync ? ago(Date.parse(f.last_sync)) : '–'}</span></div>
+      <div class="li"><span class="k">Son senkron</span><span class="v">${f.button_code && f.last_sync ? when(Date.parse(f.last_sync)) : '–'}</span></div>
       <div class="li"><span class="k">Hedef</span><span class="v">${f.goal_h || '–'} sa</span></div>
       <div class="li"><span class="k">Klinisyen</span><span class="v">${f.clinicians}</span></div>
       <div class="li"><span class="k">Kayıt</span><span class="v">${fmtDate(Date.parse(f.created_at))}</span></div>
