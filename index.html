@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.25 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.26 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 function btnName(code) {
@@ -1959,6 +1959,18 @@ if (SRV.on) {
     <button class="btn text" data-act="pwOpen" data-arg="owner" style="align-self:center">Kendi şifremi değiştir</button>
   </main>`;
   };
+  // the family's clinicians; the owner can add one hidden from the family (e.g. the thesis advisor)
+  const teamCard = (f, team) => {
+    const kindTr = k => k === 'orthotist' ? 'ortotist' : 'doktor';
+    if (!team) return `<section class="card"><b>Klinisyenler</b><p class="small">Liste yüklenemedi. <button class="btn text" data-act="ownerOpenFam" data-arg="${esc(f.id)}">Tekrar dene</button></p></section>`;
+    const free = (SRV.owner.clinicians || []).filter(c => c.approved && !team.some(t => t.clinician_id === c.id));
+    return `<section class="card"><b>Klinisyenler</b><p class="small" style="margin:4px 0 8px">Gizli atanan klinisyen bu aileyi diğer klinisyenler gibi görür; aile onu listesinde görmez ve kaldıramaz. Her değişiklik erişim günlüğüne yazılır.</p>
+      <div class="list">${team.map(t => `<div class="li"><span><span class="k">${esc(t.name)}</span><br><span class="small">${kindTr(t.kind)} · ${t.hidden ? '<b>gizli</b> (aile görmüyor)' : 'aile görüyor'}</span></span><button class="btn text" data-act="ownerUnlinkClin" data-arg="${esc(t.clinician_id)}">Kaldır</button></div>`).join('') || '<p class="small">Bağlı klinisyen yok.</p>'}</div>
+      ${free.length ? `<label class="f" style="margin-top:10px">Klinisyen ekle<select class="in" id="tc">${free.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (${kindTr(c.kind)})</option>`).join('')}</select></label>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="th" checked> Aileden gizle</label>
+      <button class="btn primary" data-act="ownerLinkClin" style="margin-top:10px">Ata</button>` : '<p class="small" style="margin-top:8px">Eklenecek başka onaylı klinisyen yok.</p>'}
+    </section>`;
+  };
   // one family: hours (logged) + button assignment
   SCREENS.ownerFam = p => {
     const f = SRV.owner.families.find(x => x.id === p.id);
@@ -1982,6 +1994,7 @@ if (SRV.on) {
       <div class="grid2" style="margin-top:10px"><button class="btn secondary" data-act="ownerReadButton">Butonu oku</button><button class="btn primary" data-act="ownerAssign">Bu butonu ver</button></div>
       ${f.button_code ? `<button class="btn text" data-act="ownerUnassign" style="margin-top:6px">Butonu bu aileden ayır</button>` : ''}
     </section>
+    ${teamCard(f, p.team)}
     <section class="card"><b>Şifre</b><p class="small" style="margin:4px 0 8px">Aile şifresini unuttuysa önce telefonda kimliğini doğrula (buton kodu, şehir, kayıt ayı). Sonra geçici şifre oluştur; aile ilk girişte kendi şifresini belirler.</p>
       <button class="btn secondary" data-act="ownerResetPw" data-arg="${esc(f.id)}">Şifreyi sıfırla</button></section>
     <section class="card"><b>Saatler</b><p class="small" style="margin:4px 0 8px">Her görüntüleme erişim günlüğüne yazılır.</p>
@@ -2016,9 +2029,25 @@ if (SRV.on) {
   ACTIONS.ownerRefresh = async () => { try { await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerApprove = async id => { try { const code = await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: true }); toast('Onaylandı: ' + code); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.ownerReject = async id => { if (!confirm('Bu klinisyen onaylanmayacak. Emin misin?')) return; try { await SRV.rpc('owner_approve_clinician', { p_id: id, p_ok: false }); await SRV.loadOwner(); render(); } catch (e) { toast(trErr(e)); } };
-  ACTIONS.ownerOpenFam = id => go('ownerFam', { id });
+  ACTIONS.ownerOpenFam = async (id, extra) => {
+    let team = null; try { team = await SRV.rpc('owner_family_team', { p_family: id }); } catch (e) {}
+    go('ownerFam', Object.assign({ id, team }, extra || {}));
+  };
+  ACTIONS.ownerLinkClin = async () => {
+    const f = SRV.owner.families.find(x => x.id === params.id), id = $('#tc').value, hidden = $('#th').checked;
+    const c = SRV.owner.clinicians.find(x => x.id === id); if (!f || !c) return;
+    if (!confirm(`${c.name} bu aileye bağlansın mı: ${famName(f)}?\n\n${hidden ? 'Gizli: aile bu klinisyeni görmez ve kaldıramaz; klinisyen aileyi saatleriyle görür.' : 'Aile bu klinisyeni Doktorum ve ortotistim listesinde görür.'}`)) return;
+    try { await SRV.rpc('owner_link_clinician', { p_family: f.id, p_clinician: id, p_hidden: hidden }); await SRV.loadOwner(); await ACTIONS.ownerOpenFam(f.id); toast(`${c.name} bağlandı${hidden ? ' (gizli)' : ''}.`); }
+    catch (e) { toast(trErr(e)); }
+  };
+  ACTIONS.ownerUnlinkClin = async id => {
+    const f = SRV.owner.families.find(x => x.id === params.id), t = (params.team || []).find(x => x.clinician_id === id);
+    if (!f || !t || !confirm(`${t.name} bu aileden ayrılsın mı: ${famName(f)}?\n\nKlinisyen bu aileyi artık görmez.`)) return;
+    try { await SRV.rpc('owner_unlink_clinician', { p_family: f.id, p_clinician: id }); await SRV.loadOwner(); await ACTIONS.ownerOpenFam(f.id); toast('Klinisyen ayrıldı.'); }
+    catch (e) { toast(trErr(e)); }
+  };
   const ownerTo = s => { const f = SRV.owner.families.find(x => x.id === params.id); if (!f || !f.button_code) return;
-    go(s, { code: f.button_code, fid: f.id, name: famName(f), backTo: { screen: 'ownerFam', params: { id: f.id } }, backLabel: famName(f) }); };
+    go(s, { code: f.button_code, fid: f.id, name: famName(f), backTo: { screen: 'ownerFam', params: { id: f.id, team: params.team } }, backLabel: famName(f) }); };
   ACTIONS.ownerRaw = () => ownerTo('raw');
   ACTIONS.ownerCal = () => ownerTo('calPage');
   ACTIONS.ownerScan = async () => {
@@ -2063,7 +2092,7 @@ if (SRV.on) {
   };
   ACTIONS.ownerReadButton = async () => { const ok = await bleConnect({ infoOnly: true }); if (ok && B.info) { render(); toast('Buton: ' + B.info.code); } };
   ACTIONS.ownerHours = async () => {
-    try { const rows = await SRV.rpc('owner_family_overview', { p_family: params.id }); go('ownerFam', { id: params.id, hours: rows }); SRV.loadOwner().catch(() => {}); }
+    try { const rows = await SRV.rpc('owner_family_overview', { p_family: params.id }); go('ownerFam', { id: params.id, hours: rows, team: params.team }); SRV.loadOwner().catch(() => {}); }
     catch (e) { toast(trErr(e)); }
   };
   ACTIONS.ownerRawCsv = async () => {
@@ -2087,13 +2116,13 @@ if (SRV.on) {
     const msg = other ? `${code} şu an başka bir ailede: ${famName(other)}.\n\nOndan alınıp bu aileye verilecek: ${famName(f)}\n\nÖnceki aile yeni buton bağlayana kadar saat kaydedemez. Emin misin?`
                       : `${code} bu aileye verilsin mi: ${famName(f)}?${f.button_code ? ` Şu anki butonu (${f.button_code}) boşa çıkar.` : ''}`;
     if (!confirm(msg)) return;
-    try { await SRV.rpc('owner_assign_button', { p_family: f.id, p_code: code }); await SRV.loadOwner(); go('ownerFam', { id: f.id }); toast(`${code} → ${famName(f)}`); }
+    try { await SRV.rpc('owner_assign_button', { p_family: f.id, p_code: code }); await SRV.loadOwner(); await ACTIONS.ownerOpenFam(f.id); toast(`${code} → ${famName(f)}`); }
     catch (e) { toast(trErr(e)); }
   };
   ACTIONS.ownerUnassign = async () => {
     const f = SRV.owner.families.find(x => x.id === params.id);
     if (!confirm(`${f.button_code} bu aileden ayrılsın mı: ${famName(f)}?\n\nAilenin saatleri hesabında kalır. Aile yeni buton bağlayana kadar saat kaydedemez.`)) return;
-    try { await SRV.rpc('owner_assign_button', { p_family: f.id, p_code: '' }); await SRV.loadOwner(); go('ownerFam', { id: f.id }); toast('Buton boşa çıktı.'); }
+    try { await SRV.rpc('owner_assign_button', { p_family: f.id, p_code: '' }); await SRV.loadOwner(); await ACTIONS.ownerOpenFam(f.id); toast('Buton boşa çıktı.'); }
     catch (e) { toast(trErr(e)); }
   };
   LIVE.add('famConnect');
