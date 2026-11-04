@@ -1959,7 +1959,7 @@ if (SRV.on) {
     <button class="btn text" data-act="pwOpen" data-arg="owner" style="align-self:center">Kendi şifremi değiştir</button>
   </main>`;
   };
-  // the family's clinicians; the owner can add one hidden from the family (e.g. the thesis advisor)
+  // the family's clinicians (owner view)
   const teamCard = (f, team) => {
     const kindTr = k => k === 'orthotist' ? 'ortotist' : 'doktor';
     if (!team) return `<section class="card"><b>Klinisyenler</b><p class="small">Liste yüklenemedi. <button class="btn text" data-act="ownerOpenFam" data-arg="${esc(f.id)}">Tekrar dene</button></p></section>`;
