@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.28 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.29 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -891,7 +891,7 @@ SCREENS.clinList = () => {
   const lastOf = c => (P[c] && P[c].noButton) ? undefined : getMeta(c).lastSync;
   const fwOf = c => getMeta(c).fw;
   const late = codes.filter(c => { const a = syncAge(lastOf(c), fwOf(c)); return lastOf(c) !== undefined && a && a.level !== 'ok'; }).sort((a, b) => (lastOf(a) || 0) - (lastOf(b) || 0));
-  const rows = codes.map(c => { const s = summary(c), g = (P[c] && P[c].goal) || 16, nm = P[c] && P[c].displayName; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(nm || btnText(c))}</span><br><span class="small">${nm ? esc(P[c].noButton ? 'buton yok' : btnText(c)) + ' · ' : ''}${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : s.todayData ? 'bugün ' + fmtH1(s.todayMs) + ' sa' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven && showInterp() ? '<span class="chip">Düzensiz</span>' : ''}${lastOf(c) !== undefined ? syncChip(lastOf(c), fwOf(c)) : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
+  const rows = codes.map(c => { const s = summary(c), g = (P[c] && (P[c].staffGoal || P[c].goal)) || 16, nm = P[c] && P[c].displayName; return `<button class="li" data-act="openPatient" data-arg="${esc(c)}"><span><span class="k">${esc(nm || btnText(c))}</span><br><span class="small">${nm ? esc(P[c].noButton ? 'buton yok' : btnText(c)) + ' · ' : ''}${s.daysWithData ? fmtH1(s.avg) + ' sa ort.' : s.todayData ? 'bugün ' + fmtH1(s.todayMs) + ' sa' : 'veri yok'} · hedef ${g} sa</span> ${s.uneven && showInterp() ? '<span class="chip">Düzensiz</span>' : ''}${lastOf(c) !== undefined ? syncChip(lastOf(c), fwOf(c)) : ''}</span>${miniBars(c, g * 3.6e6)}</button>`; }).join('');
   const lateCard = late.length ? `<section class="card alert"><b>${late.length} ailenin butonu okunmayı bekliyor</b><p class="help" style="margin:6px 0 0">${MEMORY_NOTE} Aileyi arayıp uygulamayı açmasını hatırlatın.</p></section>` : '';
   return `<main>
   <header class="row"><div><div class="sub">${esc((CLINICIANS.find(x => x.u === session.u) || {}).name || '')} <span class="chip">Doğrulanmış</span></div><h1>Hastalarım</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
@@ -903,7 +903,7 @@ SCREENS.clinList = () => {
 };
 SCREENS.clinList.after = () => { knownCodes().forEach(c => { if (!DAYCACHE[c]) computeDays(c).then(refresh); }); };
 SCREENS.clinPatient = p => {
-  const code = p.code, P = profiles(), prof = P[code] || {}, g = prof.goal || 16, goalMs = g * 3.6e6, s = summary(code);
+  const code = p.code, P = profiles(), prof = P[code] || {}, g = prof.staffGoal || prof.goal || 16, goalMs = g * 3.6e6, s = summary(code);
   const days = daysList(code, 14), model = getModel(code), meta = getMeta(code);
   const hist = (prof.goalHistory || []).slice().reverse().map(h => `<div class="li"><span class="k">${h.to} sa</span><span class="v">${h.by === 'clinician' ? 'klinisyen' : 'aile'} · ${fmtDate(h.at)}</span></div>`).join('');
   const isLive = B.connected && B.info && B.info.code === code;
@@ -913,8 +913,7 @@ SCREENS.clinPatient = p => {
   ${s.uneven && showInterp() ? '<div class="note"><b>Düzensiz</b>Son 14 günde günlük süreler arasında büyük fark var.</div>' : ''}
   <section class="card"><b>Son 14 gün</b>${barsSvg(days, goalMs, 1)}</section>
   <section class="card"><b>Haftalık harita</b><p class="small" style="margin:4px 0 8px">Son 7 gün, takılı saatler mavi.</p>${weekMapSvg(days.slice(7))}</section>
-  <section class="card"><div class="row"><b>Hedefi değiştir</b></div><div class="stepper" style="margin-top:10px"><button data-act="clinGoal" data-arg="-1" aria-label="Azalt">–</button><b>${g} saat</b><button data-act="clinGoal" data-arg="1" aria-label="Artır">+</button></div><p class="small" style="margin-top:8px">Değişiklik aileye bildirilir ve 3 gün boyunca ana ekranda görünür.</p></section>
-  <section class="card list"><div class="li"><span class="k">Hedef geçmişi</span><span></span></div>${hist || '<p class="small">Henüz değişiklik yok.</p>'}</section>
+  <section class="card"><div class="row"><b>Hedefi değiştir</b></div><div class="stepper" style="margin-top:10px"><button data-act="clinGoal" data-arg="-1" aria-label="Azalt">–</button><b>${g} saat</b><button data-act="clinGoal" data-arg="1" aria-label="Artır">+</button></div><p class="small" style="margin-top:8px">Bu hedef yalnızca senin sayfanda kullanılır; aileye gitmez.</p></section>
   <section class="card list">
     <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model ? fmtDate(model.createdAt) + ' · ' + (model.by === 'clinician' ? 'klinisyen' : 'aile') : 'yapılmadı'}</span></div>
     <div class="li"><span class="k">Son senkron</span><span class="v">${ago(meta.lastSync)}</span></div>
@@ -1280,9 +1279,9 @@ const ACTIONS = {
   openRaw: c => { const pr = profiles()[c] || {}; go('raw', { code: c, fid: pr.familyId, name: pr.displayName || '', backTo: { screen, params: Object.assign({}, params) }, backLabel: pr.displayName || btnText(c) }); },
   clinGoal: d => {
     const P = profiles(), code = params.code, p = P[code] || (P[code] = { goal: 16, goalHistory: [] });
-    const from = p.goal || 16, to = Math.min(23, Math.max(1, from + +d)); if (to === from) return;
-    p.goal = to; p.goalHistory = (p.goalHistory || []).concat({ from, to, by: 'clinician', at: Date.now() }); p.goalNote = { from, to, at: Date.now() };
-    saveProfiles(P); render(); toast(`Yeni hedef: ${to} saat. Aileye bildirildi.`);
+    const from = p.staffGoal || p.goal || 16, to = Math.min(23, Math.max(1, from + +d)); if (to === from) return;
+    p.staffGoal = to;   // the clinician's own goal: never reaches the family
+    saveProfiles(P); render(); toast(`Hedefin: ${to} saat.`);
   },
   csvDay: async c => {
     const recs = await getRecsAny(c, Date.now() - 864e5, Date.now() + 60e3);
@@ -1478,7 +1477,7 @@ SRV.pullFamily = async (force) => {
   p.goal = SRV.profile.goal_h;
   const g = await sv(SRV.sb.from('goal_changes').select('*').eq('family_id', SRV.user.id).order('at', { ascending: false }).limit(20));
   p.goalHistory = g.slice().reverse().map(x => ({ from: x.from_h, to: x.to_h, by: x.by_role, at: Date.parse(x.at) }));
-  p.goalNote = g[0] && g[0].by_role === 'clinician' ? { from: g[0].from_h, to: g[0].to_h, at: Date.parse(g[0].at) } : null;
+  p.goalNote = null;   // goals are separate now: nothing from a clinician reaches the family
   saveProfiles(P);
   const cal = await sv(SRV.sb.from('calibrations').select('*').eq('family_id', SRV.user.id).eq('button_code', code).eq('ok', true).order('created_at', { ascending: false }).limit(1));
   const local = getModel(code);
@@ -1506,7 +1505,7 @@ SRV.loadPatients = async () => {
   for (const pt of SRV.patients) {
     const code = pt._key = pt.button_code || ('YOK-' + pt.family_id.slice(0, 6).toUpperCase()), dc = DAYCACHE[code] = {};
     rows.filter(r => r.family_id === pt.family_id).forEach(r => { const d = rowToDay(r); dc[d.key] = dc[d.key] ? mergeDay(dc[d.key], d) : d; });
-    P[code] = Object.assign(P[code] || {}, { goal: pt.goal_h, familyId: pt.family_id, displayName: pt.display_name, noButton: !pt.button_code, remote: true });
+    P[code] = Object.assign(P[code] || {}, { staffGoal: pt.goal_h, familyId: pt.family_id, displayName: pt.display_name, noButton: !pt.button_code, remote: true });
     const m = getMeta(code);
     if (pt.last_sync) m.lastSync = Math.max(m.lastSync || 0, Date.parse(pt.last_sync));
     if (pt.mv) m.mv = pt.mv; if (pt.fw) m.fw = pt.fw;
@@ -1900,8 +1899,8 @@ if (SRV.on) {
   ACTIONS.clinRecheck = async () => { try { await SRV.loadMe(); if (SRV.profile && SRV.profile.approved) await routeAfterLogin(); else toast('Henüz onaylanmadı.'); } catch (e) { toast(trErr(e)); } };
   ACTIONS.clinRefresh = async () => { try { await SRV.loadPatients(); render(); } catch (e) { toast(trErr(e)); } };
   ACTIONS.clinGoal = async d => {
-    const code = params.code, p = profiles()[code] || {}, to = Math.min(23, Math.max(1, (p.goal || 16) + +d));
-    try { await SRV.rpc('set_goal', { p_family: p.familyId, p_goal: to }); await SRV.loadPatients(); await SRV.loadDetail(code); render(); toast(`Yeni hedef: ${to} saat. Aileye bildirildi.`); }
+    const code = params.code, p = profiles()[code] || {}, to = Math.min(23, Math.max(1, (p.staffGoal || p.goal || 16) + +d));
+    try { await SRV.rpc('set_staff_goal', { p_family: p.familyId, p_goal: to }); await SRV.loadPatients(); render(); toast(`Hedefin: ${to} saat.`); }
     catch (e) { toast(trErr(e)); }
   };
   ACTIONS.clinConnect = async () => {
