@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.30 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.31 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -2008,7 +2008,7 @@ if (SRV.on) {
       <button class="btn secondary" data-act="ownerResetPw" data-arg="${esc(f.id)}">Şifreyi sıfırla</button></section>
     <section class="card"><b>Saatler</b><p class="small" style="margin:4px 0 8px">Her görüntüleme erişim günlüğüne yazılır.</p>
       <button class="btn secondary" data-act="ownerHours">Saatleri göster</button>${hours}
-      <button class="btn text" data-act="ownerRawCsv" style="margin-top:6px">Ham veri CSV (son 24 saat)</button></section>
+      <div class="grid2" style="margin-top:6px"><button class="btn text" data-act="ownerRawCsv">Ham veri CSV (son 24 saat)</button><button class="btn text" data-act="ownerRawCsvAll">Ham veri CSV (tüm günler)</button></div></section>
   </main>`;
   };
   SCREENS.ownerPw = p => `<main>
@@ -2114,6 +2114,37 @@ if (SRV.on) {
       if (!recs.length) { toast('Sunucuda son 24 saatin ölçümü yok.'); return; }
       const name = (f.button_code || f.last_button_code || 'aile'), t00 = recs[0].t;
       download(`skolidata_${name}_24h.csv`, 'time_s,skin_C,humidity_pct,chip_C,wall_time\n' + recs.map(r => `${((r.t - t00) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip},${new Date(r.t).toISOString()}`).join('\n'));
+      SRV.loadOwner().catch(() => {});
+    } catch (e) { toast(trErr(e)); }
+  };
+  ACTIONS.ownerRawCsvAll = async () => {   // every reading the server holds for this family, all days, built one day at a time
+    const f = SRV.owner.families.find(x => x.id === params.id);
+    toast('Tüm ham veri hazırlanıyor…');
+    try {
+      const rows = await SRV.rpc('owner_raw_days', { p_family: f.id, p_from: '2024-01-01', p_to: dateKey(Date.now() + 864e5) });
+      if (!rows || !rows.length) { toast('Sunucuda bu ailenin ham verisi yok.'); return; }
+      const parts = ['time_s,skin_C,humidity_pct,chip_C,wall_time,button\n'], days = new Set();
+      let t00 = null, n = 0;
+      for (let i = 0; i < rows.length;) {
+        const day = rows[i].day; let recs = [];
+        for (; i < rows.length && rows[i].day === day; i++) {
+          const code = rows[i].button_code;
+          recs = recs.concat((await decodeRawRow(rows[i], code)).map(r => Object.assign(r, { code })));
+        }
+        recs.sort((a, b) => a.t - b.t);
+        let s = '', prev = null;
+        for (const r of recs) {
+          if (prev && r.t === prev.t && r.code === prev.code) continue;   // a reading uploaded twice
+          prev = r; if (t00 === null) t00 = r.t;
+          s += `${((r.t - t00) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip ?? ''},${new Date(r.t).toISOString()},${r.code}\n`; n++;
+        }
+        if (s) { parts.push(s); days.add(day); }
+      }
+      if (!n) { toast('Sunucuda bu ailenin ham verisi yok.'); return; }
+      const name = (f.button_code || f.last_button_code || 'aile');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(parts, { type: 'text/csv' }));
+      a.download = `skolidata_${name}_tum_gunler.csv`; document.body.appendChild(a); a.click(); a.remove();
+      toast(`CSV indirildi: ${days.size} gün, ${n.toLocaleString('tr-TR')} ölçüm.`);
       SRV.loadOwner().catch(() => {});
     } catch (e) { toast(trErr(e)); }
   };
