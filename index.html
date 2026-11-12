@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.31 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.32 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -940,7 +940,7 @@ SCREENS.raw = p => {
     <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model.isDefault ? 'yok (varsayılan değerler)' : fmtDate(model.createdAt) + (model.kind === 'manual' ? ' · elle ayarlandı' : '')}</span></div>
     <div class="li"><span class="k">Buton yazılımı</span><span class="v">${esc(meta.fw || '–')}</span></div></section>
   <button class="btn primary" data-act="openCal" data-arg="${esc(code)}">Kalibrasyon sayfası</button>
-  <div class="grid2"><button class="btn secondary" data-act="csvRange" data-arg="${esc(code)}">CSV (${rangeLabel(range)}${range > LONG_H ? ', dakikalık' : ''})</button><button class="btn secondary" data-act="csvCal" data-arg="${esc(code)}">Kalibrasyon CSV</button></div>
+  <button class="btn secondary" data-act="csvRange" data-arg="${esc(code)}">CSV (${rangeLabel(range)}${range > LONG_H ? ', dakikalık' : ''})</button>
   <section class="card"><b>Bluetooth günlüğü</b><pre class="log">${esc(APP_VERSION + '\n' + B.log.join('\n'))}</pre></section>
 </main>`;
 };
