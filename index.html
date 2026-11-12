@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.32 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.33 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -1986,6 +1986,14 @@ if (SRV.on) {
     if (!f) return `<main>${backBtn('owner', 'Yönetim')}<p class="small">Aile bulunamadı.</p></main>`;
     const hours = p.hours ? (p.hours.length ? `<div class="list" style="margin-top:8px">${p.hours.map(r => `<div class="li"><span class="k">${esc(String(r.day).slice(0, 10))}</span><span class="v">${fmtH1(r.worn_min * 6e4)} sa / hedef ${r.goal_h}${r.unsure_min ? ' · emin değil ' + fmtH1(r.unsure_min * 6e4) : ''}</span></div>`).join('')}</div>` : '<p class="small">Veri yok.</p>') : '';
     const read = B.info && B.info.code && B.info.code !== f.button_code ? B.info.code : '';
+    let charts = '';
+    if (p.dmap) {   // the same two charts the clinician sees: last 14 days + week map
+      const t0 = startOfDay(Date.now()), days = [];
+      for (let d = 13; d >= 0; d--) { const k = dateKey(addDays(t0, -d)); days.push(p.dmap[k] || { key: k, start: addDays(t0, -d), ms: 0, dataMs: 0, unsureMs: 0, segs: [] }); }
+      const goalMs = (f.goal_h || 16) * 3.6e6;
+      charts = `<div style="margin-top:12px"><b>Son 14 gün</b>${barsSvg(days, goalMs, 1)}</div>
+      <div style="margin-top:12px"><b>Haftalık harita</b>${p.segs ? `<p class="small" style="margin:4px 0 8px">Son 7 gün, takılı saatler mavi.</p>${weekMapSvg(days.slice(7))}` : '<p class="small" style="margin:4px 0 0">Harita için sunucuda owner_family_days fonksiyonu gerekli.</p>'}</div>`;
+    }
     return `<main>${backBtn('owner', 'Yönetim')}
     <h1>${esc(famName(f))}</h1>
     <section class="card list">
@@ -2007,7 +2015,7 @@ if (SRV.on) {
     <section class="card"><b>Şifre</b><p class="small" style="margin:4px 0 8px">Aile şifresini unuttuysa önce telefonda kimliğini doğrula (buton kodu, şehir, kayıt ayı). Sonra geçici şifre oluştur; aile ilk girişte kendi şifresini belirler.</p>
       <button class="btn secondary" data-act="ownerResetPw" data-arg="${esc(f.id)}">Şifreyi sıfırla</button></section>
     <section class="card"><b>Saatler</b><p class="small" style="margin:4px 0 8px">Her görüntüleme erişim günlüğüne yazılır.</p>
-      <button class="btn secondary" data-act="ownerHours">Saatleri göster</button>${hours}
+      <button class="btn secondary" data-act="ownerHours">Saatleri ve grafikleri göster</button>${charts}${hours}
       <div class="grid2" style="margin-top:6px"><button class="btn text" data-act="ownerRawCsv">Ham veri CSV (son 24 saat)</button><button class="btn text" data-act="ownerRawCsvAll">Ham veri CSV (tüm günler)</button></div></section>
   </main>`;
   };
@@ -2101,7 +2109,14 @@ if (SRV.on) {
   };
   ACTIONS.ownerReadButton = async () => { const ok = await bleConnect({ infoOnly: true }); if (ok && B.info) { render(); toast('Buton: ' + B.info.code); } };
   ACTIONS.ownerHours = async () => {
-    try { const rows = await SRV.rpc('owner_family_overview', { p_family: params.id }); go('ownerFam', { id: params.id, hours: rows, team: params.team }); SRV.loadOwner().catch(() => {}); }
+    try {
+      const rows = await SRV.rpc('owner_family_overview', { p_family: params.id });
+      let seg = null;   // per-button days with the worn spans (week map); older servers lack this function
+      try { seg = await SRV.rpc('owner_family_days', { p_family: params.id }); } catch (e) { blog('owner_family_days: ' + (e.message || e)); }
+      const dmap = {};
+      (seg || rows || []).forEach(r => { const d = rowToDay(r); dmap[d.key] = dmap[d.key] ? mergeDay(dmap[d.key], d) : d; });
+      go('ownerFam', { id: params.id, hours: rows, dmap, segs: !!seg, team: params.team }); SRV.loadOwner().catch(() => {});
+    }
     catch (e) { toast(trErr(e)); }
   };
   ACTIONS.ownerRawCsv = async () => {
