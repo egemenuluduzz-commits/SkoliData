@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.33 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.34 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -444,6 +444,12 @@ async function syncAll(opts = {}) {
   send('w' + Math.floor(Date.now() / 1000));   // leave a time stamp in the button (dates readings after a later restart)
   nameButtonIfNew();                           // a new button gets its number name ("SkoliData 3") the first time we know it
   if (opts.infoOnly) { B.syncing = false; refresh(); return true; }
+  return bleSync();
+}
+// download every new reading from the connected button, then hand them to the server (family, clinician or owner)
+async function bleSync() {
+  if (!B.connected || !B.info || !B.info.code) return false;
+  B.syncing = true; refresh();
   const code = B.info.code, meta = getMeta(code);
   // the button has no clock: its readings count seconds since it was switched on ("boot"). At every sync we
   // remember when that was, so readings from before a later restart (battery bump, battery change) still get their time.
@@ -451,6 +457,8 @@ async function syncAll(opts = {}) {
   const restarted = meta.boot && meta.boot.idx !== B.info.boot;
   B.seg = restarted && meta.boot.idx < B.info.boot ? { wall: meta.boot.wall, lastT: meta.boot.lastT || 0 } : null;
   let from = Math.max(meta.next || 0, B.info.first);
+  // a staff phone's first sync of a button: the last ~15 days are enough (the charts show 14), so it doesn't wait for a whole month
+  if (!meta.next && SRV.on && SRV.profile && SRV.profile.role !== 'family') from = Math.max(from, (B.info.next || 0) - 15 * 8784);
   if (restarted && B.info.boot < from) from = Math.max(B.info.boot, B.info.first);   // unsaved readings were lost in the restart: fetch the new ones
   if (restarted) blog('buton yeniden başlamış (boot ' + meta.boot.idx + ' → ' + B.info.boot + ')');
   const startFrom = from, toFetch = Math.max(1, (B.info.next || 0) - from); B.progress = 0; B.pend = []; B.rawT = 0;
@@ -1404,7 +1412,7 @@ SRV.rpc = (fn, args) => sv(SRV.sb.rpc(fn, args || {}));
 
 // family: after every sync, upload the per-day hours and the button's health (never raw readings)
 window.onSynced = async code => {
-  if (SRV.on && SRV.profile && (SRV.profile.role === 'owner' || SRV.profile.role === 'clinician')) return SRV.uploadRawStaff(code);
+  if (SRV.on && SRV.profile && (SRV.profile.role === 'owner' || SRV.profile.role === 'clinician')) return SRV.syncStaff(code);
   if (!SRV.on || !SRV.profile || SRV.profile.role !== 'family' || SRV.profile.button_code !== code) return;
   const days = Object.values(DAYCACHE[code] || {}).filter(d => d.dataMs > 0 && !d.fromServer);
   const rows = days.map(d => ({ family_id: SRV.user.id, day: d.key, worn_min: Math.round(d.ms / 6e4), unsure_min: Math.round(d.unsureMs / 6e4),
@@ -1428,10 +1436,34 @@ SRV.uploadRaw = async code => {
   }
   if (lsGet(k, null) === dirty) lsDel(k);       // newer readings that arrived meanwhile stay marked
 };
-// a clinician's or the owner's phone that synced the button keeps the server's raw readings fresh too
-// (the server keeps whichever file for a day has more readings)
+// a clinician's or the owner's phone that synced the button does the family's sync too: hours, button health, raw readings
+// (the server keeps whichever day has more data, so a thinner copy never replaces a fuller one)
+const staffFid = code => SRV.profile.role === 'owner' ? (((SRV.owner && SRV.owner.families) || []).find(f => f.button_code === code) || {}).id : (profiles()[code] || {}).familyId;
+const STAFFMODEL = {};   // code -> true once the family's newest calibration was checked in this session
+SRV.staffModel = async (code, fid) => {
+  if (STAFFMODEL[code]) return false; STAFFMODEL[code] = true;
+  const rows = SRV.profile.role === 'owner' ? await SRV.rpc('owner_calibrations', { p_family: fid })
+    : await sv(SRV.sb.from('calibrations').select('*').eq('family_id', fid).eq('button_code', code).eq('ok', true).order('created_at', { ascending: false }).limit(5));
+  const best = (rows || []).find(r => r.ok && r.model && r.button_code === code && SkoliAlgo.accepts(r.model)), local = getModel(code);
+  if (best && (!local || (best.model.createdAt || 0) > (local.createdAt || 0))) { lsSet('sk.model.' + code, best.model); return true; }
+  return false;
+};
+SRV.syncStaff = async code => {
+  const fid = staffFid(code); if (!fid) return;
+  try {
+    if (await SRV.staffModel(code, fid)) await computeDays(code, 14, true);   // hours with the family's own calibration
+    const days = Object.values(DAYCACHE[code] || {}).filter(d => d.dataMs > 0 && !d.fromServer);
+    const rows = days.map(d => ({ day: d.key, worn_min: Math.round(d.ms / 6e4), unsure_min: Math.round(d.unsureMs / 6e4),
+      data_min: Math.min(1440, Math.round(d.dataMs / 6e4)), segments: d.segs.map(([a, b]) => [Math.round((a - d.start) / 6e4), Math.round((b - d.start) / 6e4)]),
+      algo: SkoliAlgo.INFO.id, model_at: d.modelAt || 0 }));
+    const m = getMeta(code), info = B.info && B.info.code === code ? B.info : null;
+    await SRV.rpc('staff_sync_days', { p_family: fid, p_code: code, p_rows: rows, p_mv: m.mv || null, p_fw: m.fw || null,
+      p_flash: info && info.flash != null ? !!info.flash : null, p_last_sync: new Date(m.lastSync || Date.now()).toISOString() });
+  } catch (e) { blog('sunucu saatler: ' + (e.message || e)); }
+  await SRV.uploadRawStaff(code);
+};
 SRV.uploadRawStaff = async code => {
-  const fid = SRV.profile.role === 'owner' ? ((SRV.owner.families || []).find(f => f.button_code === code) || {}).id : (profiles()[code] || {}).familyId;
+  const fid = staffFid(code);
   const k = 'sk.rawdirty.' + code, dirty = lsGet(k, null); if (!fid || dirty === null) return;
   for (let a = Math.max(startOfDay(dirty), addDays(startOfDay(Date.now()), -7)); a <= Date.now(); a = addDays(a, 1)) {
     const recs = await getRecs(code, a, addDays(a, 1) - 1); if (!recs.length) continue;
@@ -2075,10 +2107,19 @@ if (SRV.on) {
       const family = await SRV.rpc('owner_register_button', { p_code: i.code, p_fw: i.fw || null, p_mv: i.mv || null });
       await SRV.loadLabels();
       await nameButtonIfNew();                         // a brand-new button is named "SkoliData <next number>" right away
+      let synced = '';
+      if (family) {                                    // a family's button: take its readings and do the family's sync (hours, health, raw)
+        if (!staffFid(i.code)) await SRV.loadOwner();
+        if (staffFid(i.code)) {
+          toast('Veriler alınıyor…');
+          const before = getMeta(i.code).next || 0;
+          if (await bleSync()) { const n = (getMeta(i.code).next || 0) - before; synced = n > 0 ? ` · ${n.toLocaleString('tr-TR')} yeni ölçüm senkronlandı` : ' · senkronlandı'; }
+        }
+      }
       SRV.owner.scan = { code: i.code, fw: i.fw, mv: i.mv, flash: i.flash, family, name: i.name };
       bleDisconnect(); B.info = null; B.live = null;
       await SRV.loadOwner();
-      render(); toast(family ? `${btnText(i.code)} şu ailede: ${family}` : `${btnText(i.code)} eklendi (boşta).`);
+      render(); toast(family ? `${btnText(i.code)} şu ailede: ${family}${synced}` : `${btnText(i.code)} eklendi (boşta).`);
     } catch (e) { bleDisconnect(); B.info = null; toast(trErr(e)); }
   };
   // service commands (need the PIN; the button answers "N ok" / "U ok" / "... bad" / "... locked")
