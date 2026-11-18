@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.34 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.35 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -815,6 +815,82 @@ function weekMapSvg(days) {
   });
   return s + '</svg>';
 }
+// staff charts: 14 days, 1 month, 3 months, 1 year (long ranges show one bar per week = the average hours of its days with data)
+const CHART_RANGES = [[14, '14 gün'], [30, '1 ay'], [90, '3 ay'], [365, '1 yıl']];
+const rangeChips = range => `<span class="seg">${CHART_RANGES.map(([n, l]) => `<button class="chip${n === range ? ' on' : ''}" data-act="chartRange" data-arg="${n}">${l}</button>`).join('')}</span>`;
+function daysFromMap(map, n) {   // n days ending today from a {dateKey: day} map
+  const t0 = startOfDay(Date.now()), arr = [];
+  for (let d = n - 1; d >= 0; d--) { const k = dateKey(addDays(t0, -d)); arr.push((map || {})[k] || { key: k, start: addDays(t0, -d), ms: 0, dataMs: 0, unsureMs: 0, segs: [] }); }
+  return arr;
+}
+function barsRangeSvg(days, goalMs, range) {
+  if (range <= 14) return barsSvg(days, goalMs, 1);
+  let items;
+  if (range <= 31) items = days.map((d, i) => { const dt = new Date(d.start); return { ms: d.ms, has: d.dataMs > 0, label: (days.length - 1 - i) % 7 === 0 ? `${dt.getDate()}.${dt.getMonth() + 1}` : '' }; });
+  else {
+    items = []; let prevM = -1, lastLab = -9;
+    for (let i = days.length % 7 ? -(7 - days.length % 7) : 0; i < days.length; i += 7) {   // weeks end today
+      const wk = days.slice(Math.max(0, i), i + 7), withData = wk.filter(d => d.dataMs > 0), dt = new Date(wk[0].start), m = dt.getMonth();
+      let label = range <= 100 ? (items.length % 2 === 0 ? `${dt.getDate()} ${MONTHS_TR[m].slice(0, 3)}` : '') : (m !== prevM ? MONTHS_TR[m].slice(0, 3) : '');
+      if (label && range > 100 && items.length - lastLab < 3) label = '';   // a month name needs room
+      if (label) lastLab = items.length;
+      prevM = m;
+      items.push({ ms: withData.length ? withData.reduce((s, d) => s + d.ms, 0) / withData.length : 0, has: withData.length > 0, label });
+    }
+  }
+  const nextLab = items.findIndex((d, i) => i > 0 && d.label);
+  if (items[0].label && nextLab > 0 && nextLab < 4) items[0].label = '';   // the first, partial month would collide with the next name
+  const W = 340, H = 150, n = items.length, bw = W / n, max = Math.max(goalMs * 1.15, ...items.map(d => d.ms), 3.6e6);
+  const y = v => H - 22 - (v / max) * (H - 32);
+  let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${range <= 31 ? 'Günlük saatler' : 'Haftalık ortalama saatler'}">`;
+  items.forEach((d, i) => {
+    s += `<rect x="${(i * bw + bw * 0.15).toFixed(1)}" y="${y(d.ms).toFixed(1)}" width="${(bw * 0.7).toFixed(1)}" height="${Math.max(0, H - 22 - y(d.ms)).toFixed(1)}" rx="${Math.min(4, bw * 0.2).toFixed(1)}" fill="${d.ms >= goalMs ? '#1E5EFF' : '#A9C8FF'}"/>`;
+    if (d.label) s += `<text x="${(i * bw + bw / 2).toFixed(1)}" y="${H - 6}" font-size="10" font-weight="700" fill="#5B6987" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${d.label}</text>`;
+  });
+  return s + `<line x1="0" x2="${W}" y1="${y(goalMs)}" y2="${y(goalMs)}" stroke="#0B1F44" stroke-dasharray="4 4" stroke-width="1.2"/><text x="${W - 2}" y="${y(goalMs) - 4}" font-size="11" font-weight="700" fill="#0B1F44" text-anchor="end">hedef ${goalMs / 3.6e6} sa</text></svg>`;
+}
+function rangeStats(days, goalMs, range) {
+  const withData = days.filter(d => d.dataMs > 0), avg = withData.length ? withData.reduce((s, d) => s + d.ms, 0) / withData.length : 0;
+  return `<p class="small" style="margin:6px 0 0">${withData.length ? `Ortalama <b>${fmtH1(avg)} sa</b> · hedefte ${withData.filter(d => d.ms >= goalMs).length} / ${withData.length} gün · veri olan gün ${withData.length} / ${days.length}` : 'Bu aralıkta veri yok.'}${range > 31 ? ' · her çubuk bir haftanın ortalaması' : ''}</p>`;
+}
+function staffChartCard(days, goalMs, range) {   // the range chart card + the last-7-days week map
+  return `<section class="card"><div class="row"><b>Saatler</b>${rangeChips(range)}</div>${barsRangeSvg(days, goalMs, range)}${rangeStats(days, goalMs, range)}</section>
+  <section class="card"><b>Haftalık harita</b><p class="small" style="margin:4px 0 8px">Son 7 gün, takılı saatler mavi.</p>${weekMapSvg(days.slice(-7))}</section>`;
+}
+function downloadCsv(name, parts) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(parts, { type: 'text/csv' })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+function hoursCsvDownload(map, goalH, name) {   // one row per day, first day with data → today
+  const keys = Object.keys(map || {}).filter(k => map[k].dataMs > 0).sort();
+  if (!keys.length) { toast('İndirilecek gün yok.'); return; }
+  const first = startOfDay(Date.parse(keys[0] + 'T12:00:00')), n = Math.round((startOfDay(Date.now()) - first) / 864e5) + 1;
+  let s = 'date,worn_h,unsure_h,data_h,goal_h,goal_met\n';
+  for (const d of daysFromMap(map, n)) s += `${d.key},${(d.ms / 3.6e6).toFixed(2)},${((d.unsureMs || 0) / 3.6e6).toFixed(2)},${(d.dataMs / 3.6e6).toFixed(2)},${goalH},${d.dataMs > 0 ? (d.ms >= goalH * 3.6e6 ? 1 : 0) : ''}\n`;
+  downloadCsv(`skolidata_${name}_saatler.csv`, [s]);
+  toast(`CSV indirildi: ${keys.length} gün.`);
+}
+// every raw reading a family has on the server, built one day at a time; fetch(from, to) returns raw_days rows
+async function rawCsvAll(fetch, firstDay, name) {
+  toast('Tüm ham veri hazırlanıyor…');
+  const parts = ['time_s,skin_C,humidity_pct,chip_C,wall_time,button\n'], days = new Set();
+  let t00 = null, n = 0;
+  for (let from = startOfDay(Date.parse(firstDay + 'T12:00:00')); from <= Date.now(); from = addDays(from, 60)) {
+    const rows = (await fetch(dateKey(from), dateKey(addDays(from, 59)))).slice().sort((a, b) => String(a.day).localeCompare(String(b.day)));
+    for (let i = 0; i < rows.length;) {
+      const day = rows[i].day; let recs = [];
+      for (; i < rows.length && rows[i].day === day; i++) { const code = rows[i].button_code; recs = recs.concat((await decodeRawRow(rows[i], code)).map(r => Object.assign(r, { code }))); }
+      recs.sort((a, b) => a.t - b.t);
+      let s = '', prev = null;
+      for (const r of recs) {
+        if (prev && r.t === prev.t && r.code === prev.code) continue;
+        prev = r; if (t00 === null) t00 = r.t;
+        s += `${((r.t - t00) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip ?? ''},${new Date(r.t).toISOString()},${r.code}\n`; n++;
+      }
+      if (s) { parts.push(s); days.add(day); }
+    }
+  }
+  if (!n) { toast('Sunucuda ham veri yok.'); return; }
+  downloadCsv(`skolidata_${name}_tum_gunler.csv`, parts);
+  toast(`CSV indirildi: ${days.size} gün, ${n.toLocaleString('tr-TR')} ölçüm.`);
+}
 SCREENS.famWeek = () => {
   const code = session.code, p = profiles()[code] || {}, goalMs = (p.goal || 16) * 3.6e6, days = daysList(code, 7);
   const withData = days.filter(d => d.dataMs > 0), avg = withData.length ? withData.reduce((s, d) => s + d.ms, 0) / withData.length : 0;
@@ -915,15 +991,14 @@ SCREENS.clinList = () => {
 SCREENS.clinList.after = () => { knownCodes().forEach(c => { if (!DAYCACHE[c]) computeDays(c).then(refresh); }); };
 SCREENS.clinPatient = p => {
   const code = p.code, P = profiles(), prof = P[code] || {}, g = prof.staffGoal || prof.goal || 16, goalMs = g * 3.6e6, s = summary(code);
-  const days = daysList(code, 14), model = getModel(code), meta = getMeta(code);
+  const range = p.range || 14, days = daysList(code, Math.max(range, 7)), model = getModel(code), meta = getMeta(code);
   const hist = (prof.goalHistory || []).slice().reverse().map(h => `<div class="li"><span class="k">${h.to} sa</span><span class="v">${h.by === 'clinician' ? 'klinisyen' : 'aile'} · ${fmtDate(h.at)}</span></div>`).join('');
   const isLive = B.connected && B.info && B.info.code === code;
   return `<main>${backBtn('clinList', 'Hastalarım')}
   <h1>${esc(btnText(code))}</h1>
   <div class="grid2"><div class="card stat"><span>${s.daysWithData ? '14 gün ortalama' : 'Bugün'}</span><b>${fmtH1(s.daysWithData ? s.avg : s.todayMs)} sa</b></div><div class="card stat"><span>Hedef</span><b>${g} sa</b></div></div>
   ${s.uneven && showInterp() ? '<div class="note"><b>Düzensiz</b>Son 14 günde günlük süreler arasında büyük fark var.</div>' : ''}
-  <section class="card"><b>Son 14 gün</b>${barsSvg(days, goalMs, 1)}</section>
-  <section class="card"><b>Haftalık harita</b><p class="small" style="margin:4px 0 8px">Son 7 gün, takılı saatler mavi.</p>${weekMapSvg(days.slice(7))}</section>
+  ${staffChartCard(days, goalMs, range)}
   <section class="card"><div class="row"><b>Hedefi değiştir</b></div><div class="stepper" style="margin-top:10px"><button data-act="clinGoal" data-arg="-1" aria-label="Azalt">–</button><b>${g} saat</b><button data-act="clinGoal" data-arg="1" aria-label="Artır">+</button></div><p class="small" style="margin-top:8px">Bu hedef yalnızca senin sayfanda kullanılır; aileye gitmez.</p></section>
   <section class="card list">
     <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model ? fmtDate(model.createdAt) + ' · ' + (model.by === 'clinician' ? 'klinisyen' : 'aile') : 'yapılmadı'}</span></div>
@@ -933,6 +1008,7 @@ SCREENS.clinPatient = p => {
   ${liveSection(code)}
   ${isLive ? '' : `<button class="btn secondary" data-act="clinConnect">Butona bağlan ve senkronize et</button>`}
   <div class="grid2" id="tools"><button class="btn secondary" data-act="openRaw" data-arg="${esc(code)}">Ham veri</button><button class="btn secondary" data-act="openCal" data-arg="${esc(code)}">Kalibrasyon</button></div>
+  <div class="grid2" id="csvs"><button class="btn text" data-act="hoursCsv" data-arg="${esc(code)}">Saatler CSV (tüm günler)</button></div>
 </main>`;
 };
 SCREENS.clinPatient.after = p => { if (!DAYCACHE[p.code]) computeDays(p.code).then(refresh); };
@@ -1316,6 +1392,8 @@ Object.assign(ACTIONS, {
     render();
   },
   rawRange: h => go('raw', Object.assign({}, params, { range: +h })),
+  chartRange: n => go(screen, Object.assign({}, params, { range: +n })),
+  hoursCsv: c => { const P = profiles()[c] || {}; hoursCsvDownload(DAYCACHE[c] || {}, P.staffGoal || P.goal || 16, (btnName(c) || c).replace(/\s+/g, '_')); },
   csvRange: async c => {   // the readings of the range shown on the Ham veri page (24 h: every reading; 1 month: one average per minute)
     const h = params.range || 24, long = h > LONG_H;
     if (long) toast('1 aylık veri hazırlanıyor…');
@@ -1547,11 +1625,16 @@ SRV.loadPatients = async () => {
     setMeta(code, m);
   }
   saveProfiles(P);
+  SRV.detail = {};   // the patient page reloads its year of days next time
 };
 SRV.loadDetail = async code => {
   const fid = (profiles()[code] || {}).familyId; if (!fid) return;
   const g = await sv(SRV.sb.from('goal_changes').select('*').eq('family_id', fid).order('at', { ascending: false }).limit(20));
   const c = (profiles()[code] || {}).noButton ? [] : await sv(SRV.sb.from('calibrations').select('*').eq('family_id', fid).eq('button_code', code).eq('ok', true).order('created_at', { ascending: false }).limit(1));
+  // a year of days for the 14 d / 1 m / 3 m / 1 y charts (the patient list only brings the last 20)
+  const rows = await sv(SRV.sb.from('day_summaries').select('*').eq('family_id', fid).gte('day', dateKey(addDays(startOfDay(Date.now()), -366))));
+  const dc = {}; rows.forEach(r => { const d = rowToDay(r); dc[d.key] = dc[d.key] ? mergeDay(dc[d.key], d) : d; });
+  if (rows.length) DAYCACHE[code] = dc;
   SRV.detail[code] = { goals: g, cal: c[0] || null };
 };
 SRV.loadOwner = async () => {
@@ -1904,9 +1987,30 @@ if (SRV.on) {
     } else {
       html = html.replace(/(<div class="grid2" id="tools">[\s\S]*?<\/div>)/, `$1\n  <button class="btn text" data-act="clinRelease" style="align-self:center">Butonu bu aileden ayır</button>`);
     }
+    html = html.replace(/(<div class="grid2" id="csvs">[\s\S]*?)(<\/div>)/, `$1<button class="btn text" data-act="clinRawCsvAll" data-arg="${esc(p.code)}">Ham veri CSV (tüm günler)</button>$2`);
     return html;
   };
   SCREENS.clinPatient.after = p => { if (SRV.detail[p.code] === undefined || SRV.detail[p.code] === null) { SRV.detail[p.code] = false; SRV.loadDetail(p.code).then(refresh).catch(e => toast(trErr(e))); } };
+  // clinician downloads: every day's hours and every raw reading the server holds for this family
+  const clinFid = c => (profiles()[c] || {}).familyId;
+  const fileName = c => (btnName(c) || c).replace(/\s+/g, '_');
+  ACTIONS.hoursCsv = async c => {
+    const P = profiles()[c] || {}, fid = clinFid(c);
+    if (!fid) return hoursCsvDownload(DAYCACHE[c] || {}, P.staffGoal || P.goal || 16, fileName(c));
+    try {
+      const rows = await sv(SRV.sb.from('day_summaries').select('*').eq('family_id', fid).order('day'));
+      const map = {}; rows.forEach(r => { const d = rowToDay(r); map[d.key] = map[d.key] ? mergeDay(map[d.key], d) : d; });
+      hoursCsvDownload(map, P.staffGoal || P.goal || 16, fileName(c));
+    } catch (e) { toast(trErr(e)); }
+  };
+  ACTIONS.clinRawCsvAll = async c => {
+    const fid = clinFid(c); if (!fid) return;
+    try {
+      const first = await sv(SRV.sb.from('raw_days').select('day').eq('family_id', fid).order('day').limit(1));
+      if (!first.length) { toast('Sunucuda bu ailenin ham verisi yok.'); return; }
+      await rawCsvAll((a, b) => sv(SRV.sb.from('raw_days').select('*').eq('family_id', fid).gte('day', a).lte('day', b).order('day')), String(first[0].day).slice(0, 10), fileName(c));
+    } catch (e) { toast(trErr(e)); }
+  };
   ACTIONS.clinLoginBtn = async () => {
     const email = clinLoginEmail($('#cu').value), pw = $('#cp').value;
     busy(true);
@@ -2016,16 +2120,15 @@ if (SRV.on) {
   SCREENS.ownerFam = p => {
     const f = SRV.owner.families.find(x => x.id === p.id);
     if (!f) return `<main>${backBtn('owner', 'Yönetim')}<p class="small">Aile bulunamadı.</p></main>`;
-    const hours = p.hours ? (p.hours.length ? `<div class="list" style="margin-top:8px">${p.hours.map(r => `<div class="li"><span class="k">${esc(String(r.day).slice(0, 10))}</span><span class="v">${fmtH1(r.worn_min * 6e4)} sa / hedef ${r.goal_h}${r.unsure_min ? ' · emin değil ' + fmtH1(r.unsure_min * 6e4) : ''}</span></div>`).join('')}</div>` : '<p class="small">Veri yok.</p>') : '';
     const read = B.info && B.info.code && B.info.code !== f.button_code ? B.info.code : '';
-    let charts = '';
-    if (p.dmap) {   // the same two charts the clinician sees: last 14 days + week map
-      const t0 = startOfDay(Date.now()), days = [];
-      for (let d = 13; d >= 0; d--) { const k = dateKey(addDays(t0, -d)); days.push(p.dmap[k] || { key: k, start: addDays(t0, -d), ms: 0, dataMs: 0, unsureMs: 0, segs: [] }); }
-      const goalMs = (f.goal_h || 16) * 3.6e6;
-      charts = `<div style="margin-top:12px"><b>Son 14 gün</b>${barsSvg(days, goalMs, 1)}</div>
-      <div style="margin-top:12px"><b>Haftalık harita</b>${p.segs ? `<p class="small" style="margin:4px 0 8px">Son 7 gün, takılı saatler mavi.</p>${weekMapSvg(days.slice(7))}` : '<p class="small" style="margin:4px 0 0">Harita için sunucuda owner_family_days fonksiyonu gerekli.</p>'}</div>`;
-    }
+    // the same charts the clinician sees, opened straight away (each opening is written to the access log)
+    const range = p.range || 14, goalMs = (f.goal_h || 16) * 3.6e6;
+    let charts = '<p class="small">Yükleniyor…</p>';
+    if (p.dmap) {
+      const days = daysFromMap(p.dmap, Math.max(range, 7)), list = days.slice().reverse().filter(d => d.dataMs > 0);
+      charts = `${staffChartCard(days, goalMs, range)}
+      <section class="card"><details><summary><b>Gün gün</b> <span class="small">(${list.length} gün)</span></summary>${list.length ? `<div class="list" style="margin-top:8px">${list.map(d => `<div class="li"><span class="k">${d.key}</span><span class="v">${fmtH1(d.ms)} sa / hedef ${f.goal_h || 16}${d.unsureMs ? ' · emin değil ' + fmtH1(d.unsureMs) : ''}</span></div>`).join('')}</div>` : '<p class="small">Veri yok.</p>'}</details></section>`;
+    } else if (p.dErr) charts = `<p class="small">Saatler yüklenemedi: ${esc(p.dErr)}</p>`;
     return `<main>${backBtn('owner', 'Yönetim')}
     <h1>${esc(famName(f))}</h1>
     <section class="card list">
@@ -2036,6 +2139,7 @@ if (SRV.on) {
       <div class="li"><span class="k">Klinisyen</span><span class="v">${f.clinicians}</span></div>
       <div class="li"><span class="k">Kayıt</span><span class="v">${fmtDate(Date.parse(f.created_at))}</span></div>
     </section>
+    ${charts}
     ${f.button_code ? `${liveSection(f.button_code)}
     <div class="grid2"><button class="btn secondary" data-act="ownerRaw">Ham veri</button><button class="btn secondary" data-act="ownerCal">Kalibrasyon</button></div>` : ''}
     <section class="card"><b>Buton ataması</b><p class="small" style="margin:4px 0 8px">Bu aileye başka bir buton ver. Buton başka bir ailedeyse ondan alınır. Her değişiklik erişim günlüğüne yazılır.</p>
@@ -2046,9 +2150,9 @@ if (SRV.on) {
     ${teamCard(f, p.team)}
     <section class="card"><b>Şifre</b><p class="small" style="margin:4px 0 8px">Aile şifresini unuttuysa önce telefonda kimliğini doğrula (buton kodu, şehir, kayıt ayı). Sonra geçici şifre oluştur; aile ilk girişte kendi şifresini belirler.</p>
       <button class="btn secondary" data-act="ownerResetPw" data-arg="${esc(f.id)}">Şifreyi sıfırla</button></section>
-    <section class="card"><b>Saatler</b><p class="small" style="margin:4px 0 8px">Her görüntüleme erişim günlüğüne yazılır.</p>
-      <button class="btn secondary" data-act="ownerHours">Saatleri ve grafikleri göster</button>${charts}${hours}
-      <div class="grid2" style="margin-top:6px"><button class="btn text" data-act="ownerRawCsv">Ham veri CSV (son 24 saat)</button><button class="btn text" data-act="ownerRawCsvAll">Ham veri CSV (tüm günler)</button></div></section>
+    <section class="card"><b>İndir</b><p class="small" style="margin:4px 0 8px">Her görüntüleme ve indirme erişim günlüğüne yazılır.</p>
+      <div class="grid2"><button class="btn text" data-act="ownerHoursCsv">Saatler CSV (tüm günler)</button><button class="btn text" data-act="ownerRawCsvAll">Ham veri CSV (tüm günler)</button></div>
+      <button class="btn text" data-act="ownerRawCsv">Ham veri CSV (son 24 saat)</button></section>
   </main>`;
   };
   SCREENS.ownerPw = p => `<main>
@@ -2149,15 +2253,22 @@ if (SRV.on) {
     else { bleDisconnect(); toast(svcErr(r)); }
   };
   ACTIONS.ownerReadButton = async () => { const ok = await bleConnect({ infoOnly: true }); if (ok && B.info) { render(); toast('Buton: ' + B.info.code); } };
-  ACTIONS.ownerHours = async () => {
-    try {
-      const rows = await SRV.rpc('owner_family_overview', { p_family: params.id });
-      let seg = null;   // per-button days with the worn spans (week map); older servers lack this function
-      try { seg = await SRV.rpc('owner_family_days', { p_family: params.id }); } catch (e) { blog('owner_family_days: ' + (e.message || e)); }
-      const dmap = {};
-      (seg || rows || []).forEach(r => { const d = rowToDay(r); dmap[d.key] = dmap[d.key] ? mergeDay(dmap[d.key], d) : d; });
-      go('ownerFam', { id: params.id, hours: rows, dmap, segs: !!seg, team: params.team }); SRV.loadOwner().catch(() => {});
-    }
+  const ownerDays = async (id, n) => {   // the family's days (all buttons), merged per date
+    let rows;
+    try { rows = await SRV.rpc('owner_family_days', { p_family: id, p_days: n }); }
+    catch (e) { blog('owner_family_days(n): ' + (e.message || e)); rows = await SRV.rpc('owner_family_days', { p_family: id }); }
+    const map = {}; (rows || []).forEach(r => { const d = rowToDay(r); map[d.key] = map[d.key] ? mergeDay(map[d.key], d) : d; });
+    return map;
+  };
+  SCREENS.ownerFam.after = p => {
+    if (p.dmap || p.dLoading || p.dErr || !SRV.owner.families.some(x => x.id === p.id)) return;
+    p.dLoading = true;
+    ownerDays(p.id, 366).then(map => { if (screen === 'ownerFam' && params.id === p.id) { params.dmap = map; render(); } })
+      .catch(e => { if (screen === 'ownerFam' && params.id === p.id) { params.dErr = trErr(e); render(); } });
+  };
+  ACTIONS.ownerHoursCsv = async () => {
+    const f = SRV.owner.families.find(x => x.id === params.id);
+    try { hoursCsvDownload(await ownerDays(f.id, 4000), f.goal_h || 16, (f.button_code ? btnName(f.button_code) || f.button_code : 'aile').replace(/\s+/g, '_')); }
     catch (e) { toast(trErr(e)); }
   };
   ACTIONS.ownerRawCsv = async () => {
@@ -2175,35 +2286,15 @@ if (SRV.on) {
   };
   ACTIONS.ownerRawCsvAll = async () => {   // every reading the server holds for this family, all days, built one day at a time
     const f = SRV.owner.families.find(x => x.id === params.id);
-    toast('Tüm ham veri hazırlanıyor…');
     try {
       const rows = await SRV.rpc('owner_raw_days', { p_family: f.id, p_from: '2024-01-01', p_to: dateKey(Date.now() + 864e5) });
       if (!rows || !rows.length) { toast('Sunucuda bu ailenin ham verisi yok.'); return; }
-      const parts = ['time_s,skin_C,humidity_pct,chip_C,wall_time,button\n'], days = new Set();
-      let t00 = null, n = 0;
-      for (let i = 0; i < rows.length;) {
-        const day = rows[i].day; let recs = [];
-        for (; i < rows.length && rows[i].day === day; i++) {
-          const code = rows[i].button_code;
-          recs = recs.concat((await decodeRawRow(rows[i], code)).map(r => Object.assign(r, { code })));
-        }
-        recs.sort((a, b) => a.t - b.t);
-        let s = '', prev = null;
-        for (const r of recs) {
-          if (prev && r.t === prev.t && r.code === prev.code) continue;   // a reading uploaded twice
-          prev = r; if (t00 === null) t00 = r.t;
-          s += `${((r.t - t00) / 1000).toFixed(0)},${r.skin ?? ''},${r.rh ?? ''},${r.chip ?? ''},${new Date(r.t).toISOString()},${r.code}\n`; n++;
-        }
-        if (s) { parts.push(s); days.add(day); }
-      }
-      if (!n) { toast('Sunucuda bu ailenin ham verisi yok.'); return; }
-      const name = (f.button_code || f.last_button_code || 'aile');
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(parts, { type: 'text/csv' }));
-      a.download = `skolidata_${name}_tum_gunler.csv`; document.body.appendChild(a); a.click(); a.remove();
-      toast(`CSV indirildi: ${days.size} gün, ${n.toLocaleString('tr-TR')} ölçüm.`);
+      const first = rows.map(r => String(r.day).slice(0, 10)).sort()[0];
+      await rawCsvAll(async (a, b) => rows.filter(r => { const d = String(r.day).slice(0, 10); return d >= a && d <= b; }), first, ((f.button_code || f.last_button_code) ? btnName(f.button_code || f.last_button_code) || (f.button_code || f.last_button_code) : 'aile').replace(/\s+/g, '_'));
       SRV.loadOwner().catch(() => {});
     } catch (e) { toast(trErr(e)); }
   };
+
   ACTIONS.ownerAssign = async () => {
     const code = $('#ac').value.trim().toUpperCase(), f = SRV.owner.families.find(x => x.id === params.id);
     if (!/^SK-[2-9A-HJ-NP-Z]{8}$/.test(code)) { toast('Buton kodu SK-XXXXXXXX biçiminde olmalı.'); return; }
