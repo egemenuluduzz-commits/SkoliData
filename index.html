@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.35 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.36 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -1539,6 +1539,9 @@ SRV.syncStaff = async code => {
       p_flash: info && info.flash != null ? !!info.flash : null, p_last_sync: new Date(m.lastSync || Date.now()).toISOString() });
   } catch (e) { blog('sunucu saatler: ' + (e.message || e)); }
   await SRV.uploadRawStaff(code);
+  // the open page shows the new hours at once (owner family page / clinician patient page)
+  if (SRV.profile.role === 'owner' && screen === 'ownerFam' && params.id === fid) { delete params.dmap; delete params.dLoading; delete params.dErr; render(); }
+  if (SRV.profile.role === 'clinician') { delete SRV.detail[code]; if (screen === 'clinPatient' && params.code === code) render(); }
 };
 SRV.uploadRawStaff = async code => {
   const fid = staffFid(code);
