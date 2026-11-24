@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.36 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.37 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -2211,7 +2211,7 @@ if (SRV.on) {
     if (!ok || !B.info) return;
     const i = B.info;
     try {
-      const family = await SRV.rpc('owner_register_button', { p_code: i.code, p_fw: i.fw || null, p_mv: i.mv || null });
+      const family = await SRV.rpc('owner_register_button', { p_code: i.code, p_fw: i.fw || null, p_mv: i.mv || null, p_flash: i.old || i.flash == null ? null : !!i.flash });
       await SRV.loadLabels();
       await nameButtonIfNew();                         // a brand-new button is named "SkoliData <next number>" right away
       let synced = '';
