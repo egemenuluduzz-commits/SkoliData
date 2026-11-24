@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.37 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.38 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -1451,7 +1451,7 @@ function download(name, text) {
 // ================= server (Supabase) — active only when config.js is filled in =================
 const SKCFG = window.SKOLI_CONFIG || {};
 const SRV = { on: !!(SKCFG.supabaseUrl && SKCFG.supabaseAnonKey && window.supabase), sb: null, user: null, profile: null,
-              lastPull: 0, patients: [], clinicians: [], detail: {}, labels: {}, owner: { clinicians: [], health: [], cities: [], audit: [], families: [] } };
+              lastPull: 0, patients: [], clinicians: [], detail: {}, labels: {}, owner: { clinicians: [], health: [], audit: [], families: [] } };
 if (SRV.on) SRV.sb = window.supabase.createClient(SKCFG.supabaseUrl, SKCFG.supabaseAnonKey);
 window.SRV_ON = SRV.on;
 // families have no real e-mail: a random login address, found again from the button code at login
@@ -1641,11 +1641,11 @@ SRV.loadDetail = async code => {
   SRV.detail[code] = { goals: g, cal: c[0] || null };
 };
 SRV.loadOwner = async () => {
-  const [c, h, ci, a, f] = await Promise.all([SRV.rpc('owner_clinicians'), SRV.rpc('owner_button_health'), SRV.rpc('owner_city_counts'), SRV.rpc('owner_audit_log', { p_limit: 30 }), SRV.rpc('owner_families')]);
+  const [c, h, a, f] = await Promise.all([SRV.rpc('owner_clinicians'), SRV.rpc('owner_button_health'), SRV.rpc('owner_audit_log', { p_limit: 30 }), SRV.rpc('owner_families')]);
   let kinds = []; try { kinds = await SRV.rpc('owner_clinician_kinds'); } catch (e) {}
   c.forEach(x => { const k = kinds.find(y => y.id === x.id); x.kind = k ? k.kind : 'doctor'; });
   await SRV.loadLabels();
-  Object.assign(SRV.owner, { clinicians: c, health: h, cities: ci, audit: a, families: f, loaded: Date.now() });
+  Object.assign(SRV.owner, { clinicians: c, health: h, audit: a, families: f, loaded: Date.now() });
 };
 async function routeAfterLogin() {
   const p = SRV.profile;
@@ -2067,16 +2067,15 @@ if (SRV.on) {
   SCREENS.owner = () => {
     const o = SRV.owner, pending = o.clinicians.filter(c => !c.approved), approved = o.clinicians.filter(c => c.approved);
     const fwOf = code => ((o.health || []).find(h => h.code === code) || {}).fw;
-    const stale = h => !h.last_sync || Date.now() - Date.parse(h.last_sync) > syncWarnDays(h.fw) * 864e5;
-    const healthRow = h => `<div class="li"><span><span class="k">${esc(btnText(h.code))}</span><br><span class="small">${h.assigned ? esc(h.family_name || 'ailede') : 'boşta'} · ${h.fw ? esc(h.fw) : '–'} · ${h.flash === false ? 'flash yok · ' : ''}${h.last_sync ? when(Date.parse(h.last_sync)) : 'hiç senkron yok'}</span></span><span class="chip">${!h.assigned ? '⚪ boşta' : stale(h) ? `⚪ ${syncWarnDays(h.fw)}+ gün yok` : h.mv && h.mv < 2750 ? '🔵 pil az' : '🟢 çalışıyor'}</span></div>`;
     const famRow = f => `<button class="li" data-act="ownerOpenFam" data-arg="${esc(f.id)}"><span><span class="k">${esc(famName(f))}</span><br><span class="small">${esc(f.city || '')} · ${f.button_code ? esc(btnText(f.button_code)) : 'buton yok'}${f.clinicians ? ' · ' + f.clinicians + ' klinisyen' : ''}${f.button_code ? ' · ' + (f.last_sync ? when(Date.parse(f.last_sync)) : 'senkron yok') : ''}</span>${f.button_code ? ' ' + syncChip(f.last_sync ? Date.parse(f.last_sync) : 0, fwOf(f.button_code)) : ''}</span><span class="v">›</span></button>`;
     const waiting = o.families.filter(f => { if (!f.button_code || !f.last_sync) return false; const a = syncAge(Date.parse(f.last_sync), fwOf(f.button_code)); return a && a.level !== 'ok'; }).sort((a, b) => Date.parse(a.last_sync) - Date.parse(b.last_sync));
     const waitCard = waiting.length ? `<section class="card list alert"><div class="li"><span class="k">Okunmayı bekleyen butonlar</span><span class="v">${waiting.length}</span></div>${waiting.map(famRow).join('')}<p class="small">${MEMORY_NOTE} En eski kayıtların üzerine yazılmadan önce aileye (ya da klinisyenine) ulaşıp uygulamayı açmasını hatırlatın.</p></section>` : '';
     return `<main>
     <header class="row"><div><div class="sub">SkoliData yönetici</div><h1>Yönetim</h1></div><button class="btn text" data-act="logout">Çıkış</button></header>
     ${waitCard}
-    <section class="card list"><div class="li"><span class="k">Onay bekleyen klinisyenler</span><span class="v">${pending.length}</span></div>
-      ${pending.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${c.kind === 'orthotist' ? 'ortotist' : 'doktor'} · ${esc(showLogin(c.email))} · ${esc(c.city || '')}</span></span><span style="display:flex;gap:4px"><button class="btn text" data-act="ownerApprove" data-arg="${c.id}">Onayla</button><button class="btn text" data-act="ownerReject" data-arg="${c.id}">Reddet</button></span></div>`).join('') || '<p class="small">Bekleyen yok.</p>'}
+    <section class="card list">
+      <button class="li" data-act="go" data-arg="ownerClin"><span class="k">Klinisyenler</span><span class="v">${pending.length ? `<span class="chip">${pending.length} onay bekliyor</span> ` : ''}${approved.length} ›</span></button>
+      <button class="li" data-act="go" data-arg="ownerHealth"><span class="k">Buton sağlığı</span><span class="v">${o.health.length} ›</span></button>
     </section>
     <section class="card"><b>Buton ekle / kontrol et</b><p class="small" style="margin:4px 0 8px">Yeni bir butonu sisteme ekle ya da elindeki butonun kimde olduğunu, yazılımını ve pilini gör. Butonun yanında ol.</p>
       <button class="btn primary" data-act="ownerScan">Butona bağlan</button>
@@ -2097,16 +2096,34 @@ if (SRV.on) {
       ${o.families.map(famRow).join('') || '<p class="small">Henüz aile yok.</p>'}
       <p class="small">Bir aileye dokun: saatlerini gör, butonunu değiştir ya da ayır.</p>
     </section>
-    <section class="card list"><div class="li"><span class="k">Klinisyenler</span><span class="v">${approved.length}</span></div>
-      ${approved.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${c.kind === 'orthotist' ? 'ortotist' : 'doktor'} · ${c.patients} aile · ${esc(showLogin(c.email))}</span></span><button class="btn text" data-act="ownerResetPw" data-arg="${c.id}">Şifre sıfırla</button></div>`).join('') || '<p class="small">Henüz yok.</p>'}
-    </section>
-    <section class="card list"><div class="li"><span class="k">Buton sağlığı</span><span class="v">${o.health.length}</span></div>${o.health.map(healthRow).join('') || '<p class="small">Henüz buton yok.</p>'}</section>
-    <section class="card list"><div class="li"><span class="k">Şehirler</span><span class="v">aile · klinisyen</span></div>${o.cities.map(c => `<div class="li"><span class="k">${esc(c.city)}</span><span class="v">${c.families} · ${c.clinicians}</span></div>`).join('') || '<p class="small">Veri yok.</p>'}<p class="small">1–4 arası sayılar gizlilik için "1-4" gösterilir.</p></section>
     <section class="card list"><div class="li"><span class="k">Erişim günlüğü</span><span></span></div>${o.audit.slice(0, 15).map(a => `<div class="li"><span class="small">${new Date(a.at).toLocaleString('tr-TR')}</span><span class="v">${esc(a.action)}${a.detail && a.detail.code ? ' · ' + esc(a.detail.code) : ''}${a.detail && a.detail.by ? ' · ' + esc(a.detail.by) : ''}</span></div>`).join('') || '<p class="small">Boş.</p>'}</section>
     <button class="btn text" data-act="ownerRefresh" style="align-self:center">Yenile</button>
     <button class="btn text" data-act="pwOpen" data-arg="owner" style="align-self:center">Kendi şifremi değiştir</button>
   </main>`;
   };
+  // owner: clinicians on their own page (waiting for approval first, then approved)
+  SCREENS.ownerClin = () => {
+    const o = SRV.owner, pending = o.clinicians.filter(c => !c.approved), approved = o.clinicians.filter(c => c.approved);
+    return `<main>${backBtn('owner', 'Yönetim')}
+    <h1>Klinisyenler</h1>
+    <section class="card list"><div class="li"><span class="k">Onay bekleyen klinisyenler</span><span class="v">${pending.length}</span></div>
+      ${pending.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${c.kind === 'orthotist' ? 'ortotist' : 'doktor'} · ${esc(showLogin(c.email))} · ${esc(c.city || '')}</span></span><span style="display:flex;gap:4px"><button class="btn text" data-act="ownerApprove" data-arg="${c.id}">Onayla</button><button class="btn text" data-act="ownerReject" data-arg="${c.id}">Reddet</button></span></div>`).join('') || '<p class="small">Bekleyen yok.</p>'}
+    </section>
+    <section class="card list"><div class="li"><span class="k">Klinisyenler</span><span class="v">${approved.length}</span></div>
+      ${approved.map(c => `<div class="li"><span><span class="k">${esc(c.name)}</span><br><span class="small">${c.kind === 'orthotist' ? 'ortotist' : 'doktor'} · ${c.patients} aile · ${esc(showLogin(c.email))}</span></span><button class="btn text" data-act="ownerResetPw" data-arg="${c.id}">Şifre sıfırla</button></div>`).join('') || '<p class="small">Henüz yok.</p>'}
+    </section>
+  </main>`;
+  };
+  // owner: a small page with every button's firmware, memory, battery and last sync
+  function ownerHealthRow(h) {
+    const stale = !h.last_sync || Date.now() - Date.parse(h.last_sync) > syncWarnDays(h.fw) * 864e5;
+    return `<div class="li"><span><span class="k">${esc(btnText(h.code))}</span><br><span class="small">${h.assigned ? esc(h.family_name || 'ailede') : 'boşta'} · ${h.fw ? esc(h.fw) : '–'} · ${h.flash === false ? 'flash yok · ' : h.flash === true ? 'hafıza çalışıyor · ' : ''}${h.last_sync ? when(Date.parse(h.last_sync)) : 'hiç senkron yok'}</span></span><span class="chip">${!h.assigned ? '⚪ boşta' : stale ? `⚪ ${syncWarnDays(h.fw)}+ gün yok` : h.mv && h.mv < 2750 ? '🔵 pil az' : '🟢 çalışıyor'}</span></div>`;
+  }
+  SCREENS.ownerHealth = () => `<main>${backBtn('owner', 'Yönetim')}
+    <h1>Buton sağlığı</h1>
+    <section class="card list">${SRV.owner.health.map(ownerHealthRow).join('') || '<p class="small">Henüz buton yok.</p>'}</section>
+    <p class="small">Hafıza bilgisi butona bir kez bağlanınca görünür (Buton ekle / kontrol et ya da canlı sıcaklık).</p>
+  </main>`;
   // the family's clinicians (owner view)
   const teamCard = (f, team) => {
     const kindTr = k => k === 'orthotist' ? 'ortotist' : 'doktor';
