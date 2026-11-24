@@ -102,7 +102,7 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}tabl
 <script src="skolidata-algo.js"></script>
 <script>
 'use strict';
-const APP_VERSION = 'app v1.38 · algo ' + SkoliAlgo.INFO.id;
+const APP_VERSION = 'app v1.39 · algo ' + SkoliAlgo.INFO.id;
 // ---------- what people see for a button: its name ("SkoliData 3", numbered by the server). Only the owner also sees the SK code ----------
 const isOwnerView = () => !!(window.SRV_ON && typeof SRV !== 'undefined' && SRV.profile && SRV.profile.role === 'owner');
 // clinicians get the data only, no interpretation (Uneven, live status words) until enough data validates them
@@ -764,9 +764,7 @@ SCREENS.famHome = () => {
   const wk = [0, 1, 2, 3, 4, 5, 6].map(i => { const t = addDays(t0, i - dow), k = dateKey(t), d = (DAYCACHE[code] || {})[k]; return { t, k, d, label: DAYS_TR[new Date(t).getDay()], isToday: i === dow, future: i > dow }; });
   const dots = wk.map(w => { const done = w.d && w.d.ms >= goalMs; const cls = w.isToday ? 'today' + (done ? ' done' : '') : w.future ? '' : done ? 'done' : (w.d && w.d.dataMs > 0 ? 'miss' : ''); return `<div class="wd ${cls}"><span></span><span>${w.label}</span></div>`; }).join('');
   const goalNote = p.goalNote && Date.now() - p.goalNote.at < 3 * 864e5 ? `<div class="note"><b>Yeni günlük hedefin: ${p.goalNote.to} saat</b>Klinisyenin günlük hedefini ${p.goalNote.from} saatten ${p.goalNote.to} saate değiştirdi. Bu not 3 gün içinde kaybolacak.</div>` : '';
-  const calNote = !model ? `<div class="note"><b>Kalibrasyon önerilir</b>10 dakikalık kalibrasyonla saatler senin korsene göre daha doğru hesaplanır. <button class="btn text" style="min-height:36px;padding:0" data-act="calOpen" data-arg="family">Şimdi yap</button></div>` : '';
   const unevenNote = sm.uneven ? `<div class="note">Bu hafta günlerin biraz inişli çıkışlı. Her gün benzer sürede takmayı dene.</div>` : '';
-  const remindNote = lsGet('sk.remind.' + code, 0) ? '' : `<section class="card"><b>Hatırlatıcı kur</b><p class="help" style="margin:6px 0 10px">Saatlerinin kaybolmaması için uygulamayı düzenli olarak butonun yanında aç. Takvimine 2 haftada bir hatırlatıcı ekleyelim mi?</p>${remindButtons()}<button class="btn text" data-act="remindLater" style="display:flex;margin:0 auto;min-height:36px">Şimdi değil</button></section>`;
   const bat = battery(code), batNote = bat.low ? `<div class="note"><b>Pil</b>${esc(bat.txt)}<br>${CONTACT_HTML}</div>` : '';
   const d = new Date();
   return `<main>
@@ -780,8 +778,8 @@ SCREENS.famHome = () => {
   <div class="pill"><span class="dot ${status[0]}"></span><span>${status[1]}</span></div>
   ${!B.connected ? '<button class="btn primary" data-act="connect">Butona bağlan</button>' : ''}
   <section class="card"><div class="row"><b>Bu hafta</b><span class="small">${wk.filter(w => w.d && w.d.ms >= goalMs).length} gün hedefte</span></div><div class="week">${dots}</div></section>
-  ${calNote}${unevenNote}${remindNote}
-  <div class="grid2"><button class="btn secondary" data-act="go" data-arg="famWeek">Haftam</button><button class="btn secondary" data-act="calOpen" data-arg="family">Kalibrasyon</button></div>
+  ${unevenNote}
+  <button class="btn secondary" data-act="go" data-arg="famWeek">Haftam</button>
   <p class="upd">Son güncelleme: ${when(meta.lastSync && B.live ? Math.max(meta.lastSync, B.live.t) : meta.lastSync)}</p>
 </main>`;
 };
@@ -911,9 +909,7 @@ SCREENS.famSettings = () => {
     <div class="li"><span class="k">Butonum</span><span class="v">${esc(btnText(code))}</span></div>
     <button class="li" data-act="famResetStart"><span class="k">Butonu değiştir</span><span class="v">›</span></button>
     <div class="li" style="flex-direction:column;align-items:stretch"><div class="row"><span class="k">Pil</span><span class="v">${esc(bat.txt)}</span></div><div class="gauge" aria-hidden="true">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= bat.seg ? 'on' : ''}"></i>`).join('')}</div></div>
-    <div class="li"><span class="k">Kalibrasyon</span><span class="v">${model ? fmtDate(model.createdAt) : 'yapılmadı'}</span></div>
   </section>
-  <section class="card"><b>Hatırlatıcı</b><p class="help" style="margin:6px 0 10px">Takvimine 2 haftada bir "SkoliData'yı aç" hatırlatıcısı ekler. Saatini takviminden değiştirebilirsin.</p>${remindButtons()}</section>
   <section class="card list">
     <button class="li" data-act="showConsent"><span class="k">Gizlilik ve onay</span><span class="v">›</span></button>
     <a class="li" href="tel:${CONTACT.tel}"><span class="k">Telefon</span><span class="v">${CONTACT.phone}</span></a>
@@ -932,7 +928,6 @@ SCREENS.famReset = () => `<main>${backBtn('famSettings')}
     <div class="li"><span class="k">Buton başka bir aileye verilebilir.</span></div>
     <div class="li"><span class="k">Şimdiye kadarki saatlerin hesabında kalır.</span></div>
     <div class="li"><span class="k">Yeni butonunu bağlayana kadar korse saatlerin kaydedilmez.</span></div>
-    <div class="li"><span class="k">Yeni butonla 10 dakikalık kalibrasyonu tekrar yapacaksın.</span></div>
   </section>
   <label class="f">Onaylamak için şifreni yaz<input class="in" id="rp" type="password" autocomplete="current-password"></label>
   <p class="err" id="err"></p>
@@ -1295,8 +1290,7 @@ const ACTIONS = {
     saveProfiles(P);
     const m = getMeta(params.code); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(params.code, m);
     session = { role: 'family', code: params.code }; ssSet('sk.session', session);
-    CAL.phase = null; CAL.code = params.code; CAL.by = 'family';
-    go('calib');
+    go('famHome');
   },
   famLoginBtn: async () => {
     const code = $('#lc').value.trim().toUpperCase(), pw = $('#lp').value, P = profiles();
@@ -1330,8 +1324,7 @@ const ACTIONS = {
     delete p.released; delete p.releasedAt; P[c] = p; saveProfiles(P);
     const m = getMeta(c); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(c, m);
     session = { role: 'family', code: c }; ssSet('sk.session', session); delete OLDLOADED[c];
-    CAL.phase = null; CAL.result = null; CAL.code = c; CAL.by = 'family';
-    go('calib'); toast('Yeni butonun bağlandı: ' + btnText(c));
+    go('famHome'); toast('Yeni butonun bağlandı: ' + btnText(c));
   },
   famGoalAdj: d => { const P = profiles(), p = P[session.code]; const to = Math.min(23, Math.max(1, (p.goal || 16) + +d)); if (to === p.goal) return; p.goalHistory = (p.goalHistory || []).concat({ from: p.goal, to, by: 'family', at: Date.now() }); p.goal = to; saveProfiles(P); render(); },
   showConsent: () => go('consentView'),
@@ -1764,7 +1757,7 @@ if (SRV.on) {
   ACTIONS.famDoctorSave = async () => {
     const ids = ['#fdoc', '#fort'].map(x => $(x) ? $(x).value : '').filter(Boolean);
     busy(true);
-    try { if (ids.length) await linkTeam(ids); await SRV.pullFamily(true).catch(() => {}); go('calib'); }
+    try { if (ids.length) await linkTeam(ids); await SRV.pullFamily(true).catch(() => {}); go('famHome'); }
     catch (e) { toast(trErr(e)); } finally { busy(false); }
   };
   // sign-up: the connected button must be free; nothing is stored from a button that belongs to someone else
@@ -1856,8 +1849,7 @@ if (SRV.on) {
       const m = getMeta(c); if (!m.firstSeen) m.firstSeen = Date.now(); setMeta(c, m);
       await SRV.pullFamily(true);
       try { await window.onSynced(c); } catch (e) {}
-      CAL.phase = null; CAL.result = null; CAL.code = c; CAL.by = 'family';
-      go('calib'); toast('Yeni butonun bağlandı: ' + btnText(c));
+      go('famHome'); toast('Yeni butonun bağlandı: ' + btnText(c));
     } catch (e) { alert(String(e.message || e).includes('button_taken') ? TAKEN_MSG : trErr(e)); } finally { busy(false); }
   };
   ACTIONS.famGoalAdj = async d => {
